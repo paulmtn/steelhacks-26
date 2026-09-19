@@ -18,13 +18,25 @@ def draw_sprite(p,name,x,y):
         p.circ(x,y,radius,color)
 
 def draw_player(p,player,ox,oy):
-    """Draw the player's 48x64 walk-while-shooting sprite, lower-center pinned to its world position."""
+    """Draw the player's 48x64 sprite, lower-center pinned to its world position.
+
+    Picks one of four sheets from two independent states -- moving vs
+    standing still, firing (has a live auto-fire target) vs not -- see the
+    table in render.assets above PLAYER_SHEET_PATH. The two not-firing
+    sheets only have 6 rows (no dedicated E/W pose), so those go through
+    PLAYER_6ROW_FACING_MAP; the firing sheets have the full 8 and use the
+    facing index directly.
+    """
     x,y=player.pos.x-ox,player.pos.y-oy
-    sheet,colorkey=get_player_sheet()
+    if player.is_moving:
+        sheet,colorkey=get_player_sheet() if player.is_firing else get_walk_gun_sheet()
+    else:
+        sheet,colorkey=get_shooting_sheet() if player.is_firing else get_idle_gun_sheet()
+    row=player.facing if player.is_firing else PLAYER_6ROW_FACING_MAP[player.facing]
     if sheet is None:
         draw_sprite(p,"player",x,y); return
     frame=int(player.anim_time*PLAYER_ANIM_FPS)%PLAYER_FRAMES_PER_DIR
-    u,v=frame*PLAYER_FRAME_WIDTH,player.facing*PLAYER_FRAME_HEIGHT
+    u,v=frame*PLAYER_FRAME_WIDTH,row*PLAYER_FRAME_HEIGHT
     p.blt(x-PLAYER_FRAME_WIDTH//2,y-PLAYER_FRAME_HEIGHT+32,sheet,u,v,PLAYER_FRAME_WIDTH,PLAYER_FRAME_HEIGHT,colorkey)
 
 def draw_zombie(p,zombie,ox,oy):
