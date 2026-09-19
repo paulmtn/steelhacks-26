@@ -143,3 +143,29 @@ def compute_distance_field(tiled_map, target_col, target_row):
                     dist[idx] = next_dist
                     queue.append((ncol, nrow))
     return dist
+
+def has_line_of_sight(tiled_map, x0, y0, x1, y1):
+    """True if the straight segment from (x0, y0) to (x1, y1) never crosses a
+    solid (Collisions-layer) tile. Used to stop the player's auto-aim from
+    picking an enemy hidden behind a wall.
+
+    Samples the segment every half-tile rather than doing an exact tile
+    raycast (e.g. Amanatides-Woo DDA) -- simpler to get right, and a half-tile
+    step can't skip over a whole solid tile between samples, so it can't miss
+    a wall. Cheap either way: this only ever runs over the handful of
+    already-nearby, in-viewport candidates nearest_target considers, not
+    every zombie in the world.
+    """
+    dx, dy = x1 - x0, y1 - y0
+    dist = (dx * dx + dy * dy) ** .5
+    if dist == 0:
+        return True
+    step = min(tiled_map.tile_width, tiled_map.tile_height) / 2
+    steps = max(1, int(dist // step))
+    for i in range(1, steps):
+        t = i / steps
+        col = int((x0 + dx * t) // tiled_map.tile_width)
+        row = int((y0 + dy * t) // tiled_map.tile_height)
+        if is_solid_tile(tiled_map, col, row):
+            return False
+    return True

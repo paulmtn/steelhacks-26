@@ -25,3 +25,5 @@ DT_MAX = .05
 CONTACT_INVULN = .8
 SURVIVAL_TARGET = 999999
 PLAYER_ANIM_FPS = 10.0
+ZOMBIE_ANIM_FPS = 8.0  # shared baseline walk-cycle rate; also scaled per-zombie by actual speed (see move_zombies)
+WALKER_ANIM_FPS_BOOST = 1.5  # walker's frame rate is 50% faster than the shared baseline

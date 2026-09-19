@@ -98,3 +98,5 @@ def move_zombies(zombies, player, dt, speed):
         if not rect_collides(tiled_map,new_x,z.pos.y,half,half): z.pos.x=new_x
         new_y=z.pos.y+dy/d*actual*dt
         if not rect_collides(tiled_map,z.pos.x,new_y,half,half): z.pos.y=new_y
+        if dx: z.facing_right=dx>0
+        z.anim_time+=dt*actual/18  # walk-cycle plays faster/slower with the zombie's own speed
