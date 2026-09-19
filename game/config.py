@@ -1,6 +1,7 @@
 """Tunable constants for the zombie survival game."""
 WIDTH, HEIGHT, FPS = 256, 144, 60
-WORLD_WIDTH, WORLD_HEIGHT = 1024, 768
+# Matches untitled.json: a 64x64 tile map at 16px tiles.
+WORLD_WIDTH, WORLD_HEIGHT = 1024, 1024
 CELL_SIZE = 32
 MAX_ZOMBIES, MAX_BULLETS, MAX_PARTICLES, MAX_PICKUPS = 160, 96, 192, 80
 PLAYER_SPEED, BULLET_SPEED = 70.0, 210.0
