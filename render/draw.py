@@ -1,5 +1,5 @@
 from render.assets import *
-from game.config import WIDTH,HEIGHT,CELL_SIZE,WORLD_WIDTH,WORLD_HEIGHT
+from game.config import WIDTH,HEIGHT,CELL_SIZE,WORLD_WIDTH,WORLD_HEIGHT,PLAYER_ANIM_FPS
 from game.data import SHOP_ITEMS
 from game.state import GameMode
 
@@ -11,6 +11,16 @@ def draw_sprite(p,name,x,y):
         color=FALLBACK_COLORS.get(name,TEXT)
         radius=max(1,(sprite[3] if sprite else 6)//2)
         p.circ(x,y,radius,color)
+
+def draw_player(p,player,ox,oy):
+    """Draw the player's 48x64 walk-while-shooting sprite, lower-center pinned to its world position."""
+    x,y=player.pos.x-ox,player.pos.y-oy
+    sheet,colorkey=get_player_sheet()
+    if sheet is None:
+        draw_sprite(p,"player",x,y); return
+    frame=int(player.anim_time*PLAYER_ANIM_FPS)%PLAYER_FRAMES_PER_DIR
+    u,v=frame*PLAYER_FRAME_WIDTH,player.facing*PLAYER_FRAME_HEIGHT
+    p.blt(x-PLAYER_FRAME_WIDTH//2,y-PLAYER_FRAME_HEIGHT+32,sheet,u,v,PLAYER_FRAME_WIDTH,PLAYER_FRAME_HEIGHT,colorkey)
 
 def draw_tilemap(p,tiled_map,ox,oy):
     """Blit every tile of the world map visible at camera offset (ox,oy)."""
@@ -27,15 +37,15 @@ def draw_tilemap(p,tiled_map,ox,oy):
                 if not gid: continue
                 source=tile_source(tiled_map,gid)
                 if source is None: continue
-                image,u,v=source
-                p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,0)
+                image,u,v,colorkey=source
+                p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,colorkey)
 
 def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
     p.cls(BG); ox,oy=camera.x,camera.y
     draw_tilemap(p,get_world_map(),ox,oy)
     draw_sprite(p,"merchant",merchant.x-ox,merchant.y-oy)
     p.text(merchant.x-ox-14,merchant.y-oy-12,"SHOP",TEXT)
-    draw_sprite(p,"player",player.pos.x-ox,player.pos.y-oy)
+    draw_player(p,player,ox,oy)
     for z in pools.zombies.active(): draw_sprite(p,z.enemy_type,z.pos.x-ox,z.pos.y-oy)
     for b in pools.bullets.active(): draw_sprite(p,"bullet",b.pos.x-ox,b.pos.y-oy)
     for item in pools.pickups.active(): draw_sprite(p,item.kind,item.pos.x-ox,item.pos.y-oy)

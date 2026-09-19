@@ -3,8 +3,7 @@
 Replace the coordinates below when the team receives a .pyxres file.  Keeping
 the names stable means gameplay and rendering code do not need to change.
 """
-import json, os
-from dataclasses import dataclass, field
+import os, tempfile
 try:
     import pyxel
 except ImportError:
@@ -13,6 +12,7 @@ try:
     from PIL import Image as PILImage
 except ImportError:
     PILImage = None
+from game.tilemap import get_world_map, GID_FLIP_MASK
 
 SPRITES={"player":(0,0,0,8,8,0),"walker":(0,8,0,8,8,0),
          "runner":(0,16,0,8,8,0),"xp":(0,24,0,3,3,0),
@@ -56,95 +56,90 @@ def slice_image(image, tile_width, tile_height, start_index, end_index):
 
 TILE_SET=("graphics/All_Tileset.png",16,16,0,27347)
 
-# High bits Tiled sets on a gid to flag horizontal/vertical/diagonal flips.
-# Masking them off recovers the plain tileset-local tile id.
-GID_FLIP_MASK=0x1FFFFFFF
+_loaded_images = {}  # path -> (pyxel.Image, colorkey)
 
-@dataclass
-class TiledMap:
-    """A parsed Tiled JSON map: three tile layers plus the tileset(s) they draw from."""
-    width: int
-    height: int
-    tile_width: int
-    tile_height: int
-    layers: dict          # layer name -> flat row-major list[int] of gids, len width*height
-    tilesets: list         # dicts with firstgid/columns/image, sorted by firstgid descending
-    images: dict = field(default_factory=dict)  # image path -> loaded pyxel.Image, filled lazily
+# Pyxel images have no per-pixel alpha channel -- transparency only exists as
+# a single "colorkey" palette index that blt() is told to skip. Naively
+# dropping a PNG's alpha (Image.convert("RGB")) turns every transparent pixel
+# into RGB (0, 0, 0), which is indistinguishable from real black artwork
+# (hair, outlines, gun barrels, ...) once both get quantized into the same
+# palette slot -- so keying transparency off color 0 (pyxel's default black)
+# also hides every genuinely black pixel. To keep that black, transparent
+# pixels are recolored to this reserved sentinel *before* the image is ever
+# quantized or handed to pyxel, and the sentinel's resulting palette index --
+# never assumed to be 0 -- is used as the colorkey instead.
+TRANSPARENT_KEY_RGB = (255, 0, 255)
+_ALPHA_OPAQUE_THRESHOLD = 128
 
-def load_tiled_map(path, layer_names=None):
-    """Parse a Tiled JSON export and return up to three of its tile layers.
+def _flatten_transparency(path):
+    """Return a same-size RGB copy of the PNG at path with transparent pixels
+    recolored to TRANSPARENT_KEY_RGB and every opaque pixel's real color,
+    including black, left untouched."""
+    src = PILImage.open(path).convert("RGBA")
+    opaque_mask = src.split()[-1].point(lambda a: 255 if a >= _ALPHA_OPAQUE_THRESHOLD else 0)
+    flat = PILImage.new("RGB", src.size, TRANSPARENT_KEY_RGB)
+    flat.paste(src.convert("RGB"), mask=opaque_mask)
+    return flat
 
-    By default the first three "tilelayer" entries (in file order, which is
-    also Tiled's bottom-to-top draw order) are used. Pass layer_names as a
-    list of layer names to pick specific layers instead.
+def _load_image(path):
+    """Load a full-color PNG (tileset or spritesheet) as a pyxel.Image, growing
+    pyxel's palette first. Returns (image, colorkey): colorkey is the palette
+    index standing in for this image's real transparency, to pass to blt().
     """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    tile_layers = [l for l in data["layers"] if l.get("type") == "tilelayer"]
-    if layer_names is not None:
-        by_name = {l["name"]: l for l in tile_layers}
-        chosen = [(name, by_name[name]) for name in layer_names]
-    else:
-        chosen = [(l["name"], l) for l in tile_layers[:3]]
-    if not chosen:
-        raise ValueError(f"Tiled map {path!r} has no tile layers")
-    base_dir = os.path.dirname(path)
-    tilesets = sorted(
-        ({"firstgid": ts["firstgid"], "columns": ts["columns"],
-          "image": os.path.normpath(os.path.join(base_dir, ts["image"]))}
-         for ts in data["tilesets"]),
-        key=lambda ts: ts["firstgid"], reverse=True,
-    )
-    return TiledMap(
-        width=data["width"], height=data["height"],
-        tile_width=data["tilewidth"], tile_height=data["tileheight"],
-        layers={name: layer["data"] for name, layer in chosen},
-        tilesets=tilesets,
-    )
+    cached = _loaded_images.get(path)
+    if cached is not None:
+        return cached
+    if PILImage is None:
+        image = pyxel.Image.from_image(path)
+        _loaded_images[path] = (image, 0)
+        return _loaded_images[path]
 
+    flat = _flatten_transparency(path)
+    room = 256 - len(pyxel.colors)
+    if room > 0:
+        n = min(room, 240)
+        palette = flat.quantize(colors=n).getpalette()
+        # PIL returns a palette sized to the colors it actually used, which can be
+        # fewer than requested for images with a small color count -- iterate its
+        # real length, and skip colors this palette already has.
+        for i in range(len(palette) // 3):
+            r, g, b = palette[i*3:i*3+3]
+            packed = (r << 16) | (g << 8) | b
+            if packed not in pyxel.colors:
+                pyxel.colors.append(packed)
 
-_palette_extended_for = set()
+    r, g, b = TRANSPARENT_KEY_RGB
+    packed_key = (r << 16) | (g << 8) | b
+    colorkey = next((i for i, c in enumerate(pyxel.colors) if c == packed_key), 0)
 
-def _load_tileset_image(path):
-    """Load a tileset PNG as a pyxel.Image, growing pyxel's palette first.
-
-    Pyxel quantizes any loaded image down to its current (16-color by
-    default) palette. A full-color tileset PNG mostly collapsed onto a
-    couple of those indices this way -- including the one used as the
-    world's background color, which is why tiles were rendering invisible
-    against it. Feeding pyxel a few hundred more colors, sampled from the
-    tileset itself via Pillow, gives quantization enough room to keep
-    different tiles visually distinct.
-    """
-    if PILImage is not None and path not in _palette_extended_for:
-        _palette_extended_for.add(path)
-        room = 256 - len(pyxel.colors)
-        if room > 0:
-            n = min(room, 240)
-            palette = PILImage.open(path).convert("RGB").quantize(colors=n).getpalette()
-            for i in range(n):
-                r, g, b = palette[i*3:i*3+3]
-                pyxel.colors.append((r << 16) | (g << 8) | b)
-    return pyxel.Image.from_image(path)
+    fd, flat_path = tempfile.mkstemp(suffix=".png", prefix="pyxel_flat_")
+    os.close(fd)
+    try:
+        flat.save(flat_path)
+        image = pyxel.Image.from_image(flat_path)
+    finally:
+        os.remove(flat_path)
+    _loaded_images[path] = (image, colorkey)
+    return _loaded_images[path]
 
 def tile_source(tiled_map, gid):
-    """Resolve a tile gid to (image, u, v) in its tileset image, loading that image on first use."""
+    """Resolve a tile gid to (image, u, v, colorkey) in its tileset image, loading that image on first use."""
     for ts in tiled_map.tilesets:
         if gid >= ts["firstgid"]:
             local_id = gid - ts["firstgid"]
-            image = tiled_map.images.get(ts["image"])
-            if image is None:
-                image = _load_tileset_image(ts["image"])
-                tiled_map.images[ts["image"]] = image
+            image, colorkey = _load_image(ts["image"])
             col, row = local_id % ts["columns"], local_id // ts["columns"]
-            return image, col * tiled_map.tile_width, row * tiled_map.tile_height
+            return image, col * tiled_map.tile_width, row * tiled_map.tile_height, colorkey
     return None
 
-WORLD_MAP=None
+# The player's 8-direction "walk while shooting" spritesheet: 8 columns of
+# animation frames per row, one row per facing direction, in row order
+# S, SW, NW, N, NE, SE, E, W (see game.systems.movement._FACING_ROW_BY_BUCKET,
+# which maps aim/movement direction to the matching row index).
+PLAYER_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_while_Shooting.png")
+PLAYER_FRAME_WIDTH, PLAYER_FRAME_HEIGHT = 48, 64
+PLAYER_FRAMES_PER_DIR = 8
 
-def get_world_map():
-    """Load and cache the game's world map (render/untitled.json), parsing it only once."""
-    global WORLD_MAP
-    if WORLD_MAP is None:
-        WORLD_MAP=load_tiled_map(os.path.join(os.path.dirname(__file__),"untitled.json"))
-    return WORLD_MAP
+def get_player_sheet():
+    """Load and cache the player spritesheet, parsing it only once. Returns (image, colorkey)."""
+    return _load_image(PLAYER_SHEET_PATH)

@@ -26,6 +26,8 @@ class Player(Entity):
     magnet: float = 48
     shots: int = 1
     invulnerable: float = 0
+    facing: int = 0       # sprite row: 0=S,1=SW,2=NW,3=N,4=NE,5=SE,6=E,7=W
+    anim_time: float = 0  # seconds elapsed, used to pick the walk-cycle column
 
 @dataclass
 class Zombie(Entity):
