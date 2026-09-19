@@ -4,7 +4,8 @@ from game.data import Vec2
 from game.spatial_hash import SpatialHash
 from game.state import StateMachine, GameMode, PlayerProgress
 from game.entities import Player, Pickup
-from game.systems.progression import buy, collect_pickups
+from game.systems.progression import buy, collect_pickups, cleanup_dead
+from game.pools import EntityPools
 from game.systems.combat import nearest_target
 
 def test_pool_is_fixed_and_reuses():
@@ -37,3 +38,41 @@ def test_auto_target_ignores_enemies_outside_viewport():
         [visible, hidden],
         viewport=(0, 0, 256, 144),
     ) is visible
+
+def test_demo_mode_triples_pickup_rewards():
+    pools = EntityPools(1, 1, 1, 2)
+    zombie = pools.zombies.acquire()
+    zombie.active = True
+    zombie.hp = 0
+    zombie.pos = Vec2(10, 10)
+    progress = PlayerProgress()
+
+    cleanup_dead([zombie], pools, progress, reward_multiplier=3, gem_drop_chance=1)
+
+    pickups = list(pools.pickups.active())
+    assert sorted((pickup.kind, pickup.amount) for pickup in pickups) == [
+        ("gold", 3),
+        ("xp", 3),
+    ]
+    assert progress.xp == 3
+
+def test_every_kill_grants_xp_without_a_gem():
+    pools = EntityPools(1, 1, 1, 1)
+    zombie = pools.zombies.acquire()
+    zombie.active = True
+    zombie.hp = 0
+    progress = PlayerProgress()
+
+    cleanup_dead([zombie], pools, progress, gem_drop_chance=0)
+
+    assert progress.xp == 1
+    assert list(pools.pickups.active())[0].kind == "gold"
+
+def test_uncollected_pickups_expire_and_free_pool_slots():
+    player = Player(active=True, pos=Vec2(0, 0), magnet=0)
+    pickup = Pickup(active=True, pos=Vec2(100, 0), kind="gold", amount=1, ttl=0.1)
+    progress = PlayerProgress()
+
+    collect_pickups(player, (pickup,), progress, dt=0.1)
+
+    assert not pickup.active

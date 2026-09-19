@@ -30,7 +30,8 @@ def draw_tilemap(p,tiled_map,ox,oy):
                 image,u,v=source
                 p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,0)
 
-def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
+def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
+               demo_mode=False):
     p.cls(BG); ox,oy=camera.x,camera.y
     draw_tilemap(p,get_world_map(),ox,oy)
     draw_sprite(p,"merchant",merchant.x-ox,merchant.y-oy)
@@ -49,7 +50,9 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
     elif mode==GameMode.LEVEL_UP:
         cards_overlay(p, "LEVEL UP", progress.ability_choices, footer="Choose 1, 2, or 3")
     elif mode==GameMode.GAME_OVER: overlay(p,"YOU DIED","R restart")
-    if dev: p.text(4,HEIGHT-8,f"F4 +50 XP/+100 GOLD | z:{len(list(pools.zombies.active()))}",13)
+    if dev:
+        status = "DEMO 3X" if demo_mode else "NORMAL"
+        p.text(4,HEIGHT-8,f"F2 demo: {status} | z:{len(list(pools.zombies.active()))}",13)
 def overlay(p,title,hint):
     p.rect(18,52,220,42,PANEL); p.rectb(18,52,220,42,TEXT); p.text(70,60,title,10); p.text(25,78,hint,TEXT)
 

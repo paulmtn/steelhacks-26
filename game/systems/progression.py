@@ -1,18 +1,35 @@
 import random
 from game.data import ABILITIES, SHOP_ITEMS
-from game.config import PICKUP_MAGNET_SPEED
+from game.config import GEM_DROP_CHANCE, PICKUP_LIFETIME, PICKUP_MAGNET_SPEED
 
-def cleanup_dead(zombies, pools, progress):
+def cleanup_dead(
+    zombies,
+    pools,
+    progress,
+    reward_multiplier=1,
+    gem_drop_chance=GEM_DROP_CHANCE,
+):
     for z in list(zombies):
         if z.hp<=0:
             pools.zombies.release(z); progress.score += 10
-            xp=pools.pickups.acquire()
-            if xp: xp.pos.x,xp.pos.y,xp.amount,xp.kind=z.pos.x,z.pos.y,1,"xp"
+            # Every kill grants base XP; a gem is a separate 10% bonus drop.
+            progress.xp += reward_multiplier
+            if random.random() < gem_drop_chance:
+                xp=pools.pickups.acquire()
+                if xp:
+                    xp.pos.x,xp.pos.y,xp.amount,xp.kind=z.pos.x,z.pos.y,reward_multiplier,"xp"
+                    xp.ttl=PICKUP_LIFETIME
             gold=pools.pickups.acquire()
-            if gold: gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,1,"gold"
+            if gold:
+                gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,reward_multiplier,"gold"
+                gold.ttl=PICKUP_LIFETIME
 
 def collect_pickups(player, pickups, progress, dt=1/60):
     for item in list(pickups):
+        item.ttl -= dt
+        if item.ttl <= 0:
+            item.active = False
+            continue
         # Vector from the pickup to the player; moving along it pulls the
         # pickup inward instead of pushing it away.
         dx,dy=player.pos.x-item.pos.x,player.pos.y-item.pos.y

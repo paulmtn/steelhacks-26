@@ -23,7 +23,8 @@ class Game:
         self.pools=EntityPools(MAX_ZOMBIES,MAX_BULLETS,MAX_PARTICLES,MAX_PICKUPS)
         self.grid=SpatialHash(); self.player=Player(active=True,pos=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2))
         self.merchant=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2+55); self.spawn_clock=0; self.fire_clock=0
-        self.dev=False; self.hitboxes=False; self.camera=Vec2(); self.last=time.perf_counter()
+        self.dev=False; self.demo_mode=False; self.hitboxes=False
+        self.camera=Vec2(); self.last=time.perf_counter()
     def restart(self): self.__init__()
     def update(self, dt):
         if self.state.mode == GameMode.GAME_OVER: return
@@ -74,13 +75,20 @@ class Game:
                 fire(self.pools.bullets,self.player.pos.x,self.player.pos.y,sx,sy,BULLET_SPEED,self.progress.damage)
             self.fire_clock=self.progress.fire_rate
         update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
-        cleanup_dead(self.pools.zombies.active(),self.pools,self.progress)
+        reward_multiplier = 3 if self.demo_mode else 1
+        cleanup_dead(
+            self.pools.zombies.active(),
+            self.pools,
+            self.progress,
+            reward_multiplier,
+        )
         if collect_pickups(self.player,self.pools.pickups.active(),self.progress,dt): self.state.transition(GameMode.LEVEL_UP)
         self.progress.wave=1+int(self.progress.score/200)
         if (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 18**2 and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)
         if self.progress.health<=0: self.state.transition(GameMode.GAME_OVER)
     def input(self):
         if pyxel.btnp(pyxel.KEY_F3): self.dev=not self.dev
+        if pyxel.btnp(pyxel.KEY_F2): self.demo_mode=not self.demo_mode
         if pyxel.btnp(pyxel.KEY_F4):
             self.progress.xp += 50; self.progress.coins += 100
             if self.progress.xp >= self.progress.xp_to_next:
@@ -90,7 +98,10 @@ class Game:
                 self.progress.ability_choices=random.sample(ABILITIES,3); self.state.transition(GameMode.LEVEL_UP)
         if pyxel.btnp(pyxel.KEY_U) and self.state.mode == GameMode.PLAYING: self.state.transition(GameMode.UPGRADES)
         if self.state.mode==GameMode.GAME_OVER and pyxel.btnp(pyxel.KEY_R): self.restart()
-    def draw(self): draw_world(pyxel,self.player,self.pools,self.progress,self.state.mode,self.camera,self.merchant,self.dev)
+    def draw(self): draw_world(
+        pyxel, self.player, self.pools, self.progress, self.state.mode,
+        self.camera, self.merchant, self.dev, self.demo_mode,
+    )
     def _near_merchant(self): return (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 24**2
     def run(self):
         pyxel.init(WIDTH,HEIGHT,title='Night Shift',fps=FPS)

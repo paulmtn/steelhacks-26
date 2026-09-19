@@ -1,6 +1,7 @@
 """Fixed-layout entity records; inactive records are reused by pools."""
 from dataclasses import dataclass
 from game.data import Vec2
+from game.config import PICKUP_LIFETIME
 
 @dataclass
 class Entity:
@@ -49,5 +50,6 @@ class Particle(Entity):
 @dataclass
 class Pickup(Entity):
     radius: float = 3
+    ttl: float = PICKUP_LIFETIME
     amount: int = 1
     kind: str = "xp"
