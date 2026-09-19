@@ -12,7 +12,9 @@ def cleanup_dead(zombies, pools, progress):
 
 def collect_pickups(player, pickups, progress, dt=1/60):
     for item in list(pickups):
-        dx,dy=item.pos.x-player.pos.x,item.pos.y-player.pos.y
+        # Vector from the pickup to the player; moving along it pulls the
+        # pickup inward instead of pushing it away.
+        dx,dy=player.pos.x-item.pos.x,player.pos.y-item.pos.y
         distance=(dx*dx+dy*dy)**.5
         if distance <= player.magnet:
             if distance > 2:
