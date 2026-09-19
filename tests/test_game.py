@@ -8,9 +8,11 @@ from game.systems.progression import buy, collect_pickups, cleanup_dead
 from game.pools import EntityPools
 from game.systems.combat import nearest_target
 from game.systems.movement import move_player, move_zombies
-from game.tilemap import get_world_map
+from game.tilemap import get_world_map, TiledMap, compute_distance_field
 from game.systems.combat import fire_beam
 from game.systems.progression import apply_ability
+import game.systems.movement as movement_module
+import game.tilemap as tilemap_module
 
 def test_pool_is_fixed_and_reuses():
     p=Pool(Zombie,1); z=p.acquire(); assert z and p.acquire() is None; p.release(z); assert p.acquire() is z
@@ -67,6 +69,76 @@ def test_zombies_cannot_walk_through_collision_tile():
     for _ in range(600):
         move_zombies([zombie], player, 1 / 60, 18)
     assert zombie.pos.x + zombie.radius <= wall_x + 0.01
+
+def _wall_with_gap_map(width=10, height=10, tile_size=16, wall_row=5, gap_col=8):
+    """A tile grid with one solid row except a single-tile gap, forcing any
+    path across it to detour to that column."""
+    data = [0] * (width * height)
+    for col in range(width):
+        if col != gap_col:
+            data[wall_row * width + col] = 1
+    return TiledMap(width=width, height=height, tile_width=tile_size, tile_height=tile_size,
+                     layers={"Collisions": data}, tilesets=[])
+
+def test_distance_field_routes_around_a_wall_gap():
+    tm = _wall_with_gap_map()
+    tilemap_module._solid_tiles_cache.clear()
+    field = compute_distance_field(tm, target_col=1, target_row=8)
+    w = tm.width
+    assert field[5 * w + 3] == -1          # solid wall tile: unreachable/blocked
+    assert field[5 * w + 8] == 10          # the gap tile itself, on the direct route down
+    # The top-left corner is only reachable by detouring sideways to the gap
+    # column and back -- its BFS distance must exceed the straight-line (no
+    # wall) Manhattan distance to the target, proving a real detour happened.
+    direct_manhattan = abs(0 - 1) + abs(0 - 8)
+    assert field[0] > direct_manhattan
+    assert field[0] == 23
+
+def test_zombies_path_around_walls_to_reach_player(monkeypatch):
+    """A zombie separated from the player by a wall with a single gap must
+    still reach the player -- proving it actually pathfinds through the gap
+    rather than getting stuck pressed against the wall (which is what
+    straight-line-plus-wall-slide movement would do here)."""
+    tm = _wall_with_gap_map()
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    player = Player(active=True, pos=Vec2(1 * 16 + 8, 8 * 16 + 8))
+    zombie = Zombie(active=True, pos=Vec2(1 * 16 + 8, 1 * 16 + 8))
+
+    for _ in range(1200):
+        move_zombies([zombie], player, 1 / 60, 40)
+        if (zombie.pos.x - player.pos.x) ** 2 + (zombie.pos.y - player.pos.y) ** 2 < 4 ** 2:
+            break
+    else:
+        raise AssertionError("zombie never reached the player around the wall")
+
+def test_move_zombies_reuses_cached_field_within_the_same_tile(monkeypatch):
+    """The flow field is recomputed only when the player crosses into a new
+    tile -- the shared per-frame cost this whole approach relies on to stay
+    fast regardless of zombie count. Moving the player without crossing a
+    tile boundary must not trigger a recompute."""
+    tm = _wall_with_gap_map()
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    calls = []
+    real_compute = movement_module.compute_distance_field
+    def counting_compute(*args, **kwargs):
+        calls.append(1)
+        return real_compute(*args, **kwargs)
+    monkeypatch.setattr(movement_module, "compute_distance_field", counting_compute)
+
+    player = Player(active=True, pos=Vec2(1 * 16 + 8, 8 * 16 + 8))
+    zombie = Zombie(active=True, pos=Vec2(1 * 16 + 8, 1 * 16 + 8))
+    move_zombies([zombie], player, 1 / 60, 40)
+    assert len(calls) == 1
+    for _ in range(5):
+        player.pos.x += 0.1  # stays within the same tile
+        move_zombies([zombie], player, 1 / 60, 40)
+    assert len(calls) == 1
 
 def test_auto_target_ignores_enemies_outside_viewport():
     player = Player(active=True, pos=Vec2(50, 50))

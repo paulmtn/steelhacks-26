@@ -4,6 +4,7 @@ Rendering (render/assets.py, render/draw.py) imports the data model from here so
 gameplay and drawing share one parsed map instead of loading/parsing it twice.
 """
 import json, os
+from collections import deque
 from dataclasses import dataclass
 
 # High bits Tiled sets on a gid to flag horizontal/vertical/diagonal flips.
@@ -103,3 +104,42 @@ def rect_collides(tiled_map, x, y, half_width, half_height):
             if is_solid_tile(tiled_map, col, row):
                 return True
     return False
+
+_ORTHOGONAL_STEPS = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+def compute_distance_field(tiled_map, target_col, target_row):
+    """BFS tile-step distance from every walkable tile to (target_col, target_row),
+    4-directionally, respecting the Collisions layer.
+
+    Returns a flat, row-major list (len width*height) of integer step counts;
+    -1 marks a solid tile, or one BFS couldn't reach (walled off from the
+    target). Grid edges cost the same as walls: cells off the map are never
+    queued.
+
+    This single BFS is what makes pathing cheap for any number of zombies: it
+    runs once per target tile (not once per zombie), and every zombie then
+    just reads off the precomputed distance of its own tile and its
+    neighbors -- O(tiles) shared work instead of O(zombies * search). See
+    game.systems.movement.move_zombies, which caches this per player tile and
+    only recomputes when the player crosses into a new one.
+    """
+    width, height = tiled_map.width, tiled_map.height
+    dist = [-1] * (width * height)
+    if not (0 <= target_col < width and 0 <= target_row < height):
+        return dist
+    solid = _solid_tiles(tiled_map)
+    if (target_col, target_row) in solid:
+        return dist
+    dist[target_row * width + target_col] = 0
+    queue = deque(((target_col, target_row),))
+    while queue:
+        col, row = queue.popleft()
+        next_dist = dist[row * width + col] + 1
+        for dcol, drow in _ORTHOGONAL_STEPS:
+            ncol, nrow = col + dcol, row + drow
+            if 0 <= ncol < width and 0 <= nrow < height:
+                idx = nrow * width + ncol
+                if dist[idx] == -1 and (ncol, nrow) not in solid:
+                    dist[idx] = next_dist
+                    queue.append((ncol, nrow))
+    return dist
