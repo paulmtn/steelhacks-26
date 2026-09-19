@@ -12,6 +12,7 @@ from game.tilemap import get_world_map, TiledMap, compute_distance_field
 from game.systems.combat import fire_beam
 from game.systems.progression import apply_ability
 import game.systems.movement as movement_module
+import game.systems.combat as combat_module
 import game.tilemap as tilemap_module
 
 def test_pool_is_fixed_and_reuses():
@@ -150,6 +151,29 @@ def test_auto_target_ignores_enemies_outside_viewport():
         [visible, hidden],
         viewport=(0, 0, 256, 144),
     ) is visible
+
+def test_nearest_target_ignores_enemies_behind_walls(monkeypatch):
+    """A zombie directly behind a wall from the player must be skipped in
+    favor of a farther-but-visible one -- proves auto-fire targeting no
+    longer picks enemies it has no line of sight to."""
+    width, height, tile_size = 10, 10, 16
+    wall_col = 3
+    data = [0] * (width * height)
+    for row in range(height):
+        data[row * width + wall_col] = 1
+    tm = TiledMap(width=width, height=height, tile_width=tile_size, tile_height=tile_size,
+                  layers={"Collisions": data}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    player = Player(active=True, pos=Vec2(1 * tile_size + 8, 5 * tile_size + 8))
+    near_but_hidden = Zombie(active=True, pos=Vec2(5 * tile_size + 8, 5 * tile_size + 8))   # closer, behind the wall
+    far_but_visible = Zombie(active=True, pos=Vec2(0 * tile_size + 8, 0 * tile_size + 8))   # farther, clear line of sight
+    grid = SpatialHash(32)
+    grid.insert(near_but_hidden)
+    grid.insert(far_but_visible)
+
+    assert nearest_target(player, [near_but_hidden, far_but_visible], grid, max_range=200) is far_but_visible
 
 def test_demo_mode_triples_pickup_rewards():
     pools = EntityPools(1, 1, 1, 2)

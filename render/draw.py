@@ -26,6 +26,22 @@ def draw_player(p,player,ox,oy):
     u,v=frame*PLAYER_FRAME_WIDTH,player.facing*PLAYER_FRAME_HEIGHT
     p.blt(x-PLAYER_FRAME_WIDTH//2,y-PLAYER_FRAME_HEIGHT+32,sheet,u,v,PLAYER_FRAME_WIDTH,PLAYER_FRAME_HEIGHT,colorkey)
 
+def draw_zombie(p,zombie,ox,oy):
+    """Draw a zombie's walk-cycle sprite (walker/runner), centered on its
+    world position and horizontally flipped to face its direction of travel --
+    the sheets only have right-facing frames. Falls back to a colored circle
+    if the sheet ever fails to load."""
+    x,y=zombie.pos.x-ox,zombie.pos.y-oy
+    sheet_info=get_zombie_sheet(zombie.enemy_type)
+    if sheet_info is None:
+        draw_sprite(p,zombie.enemy_type,x,y); return
+    sheet,colorkey,meta=sheet_info
+    fw,fh,frames=meta["frame_width"],meta["frame_height"],meta["frames"]
+    frame=int(zombie.anim_time*meta["anim_fps"])%frames
+    u=frame*fw
+    w=fw if zombie.facing_right else -fw
+    p.blt(x-fw//2,y-fh//2,sheet,u,0,w,fh,colorkey)
+
 def draw_tilemap(p,tiled_map,ox,oy):
     """Blit every tile of the world map visible at camera offset (ox,oy)."""
     tw,th=tiled_map.tile_width,tiled_map.tile_height
@@ -56,7 +72,7 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
         orb_x = player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE
         orb_y = player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE
         p.circ(orb_x-ox, orb_y-oy, 3, 10)
-    for z in pools.zombies.active(): draw_sprite(p,z.enemy_type,z.pos.x-ox,z.pos.y-oy)
+    for z in pools.zombies.active(): draw_zombie(p,z,ox,oy)
     for b in pools.bullets.active(): draw_sprite(p,"bullet",b.pos.x-ox,b.pos.y-oy)
     for effect in pools.particles.active():
         if effect.kind == "beam":

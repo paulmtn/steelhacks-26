@@ -40,6 +40,8 @@ class Zombie(Entity):
     hp: float = 2
     kind: str = "zombie"
     enemy_type: str = "walker"
+    facing_right: bool = True  # mirrors the (right-facing) walk sprite when moving left
+    anim_time: float = 0       # seconds elapsed, scaled by speed, picks the walk-cycle frame
 
 @dataclass
 class Bullet(Entity):

@@ -27,9 +27,13 @@ class EnemyType:
     contact_damage: float
     color: int
 
+# Only two zombie classes, each with its own walk-cycle sprite (see
+# render.assets.ZOMBIE_SHEETS) -- the old plain-circle "walker"/"runner"
+# have been removed. Stats stay relative to that original walker baseline
+# (speed 18, hp 2): runner is 2x speed / 1/2 hp, walker is 1/2 speed / 2x hp.
 ENEMY_TYPES = {
-    "walker": EnemyType("walker", 18, 2, 10, 3),
-    "runner": EnemyType("runner", 30, 1, 7, 9),
+    "walker": EnemyType("walker", 9, 4, 10, 14),   # slow, tanky -- Blood Monster_A_Walk
+    "runner": EnemyType("runner", 36, 1, 10, 8),   # fast, fragile -- Demon_A_Walk
 }
 
 @dataclass(frozen=True)

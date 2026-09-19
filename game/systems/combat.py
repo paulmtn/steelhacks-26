@@ -1,3 +1,5 @@
+from game.tilemap import get_world_map, has_line_of_sight
+
 def fire(pool, x,y, dx,dy, speed, damage):
     b=pool.acquire()
     if not b:return None
@@ -36,7 +38,12 @@ def nearest_target(player, zombies, spatial_hash=None, max_range=260,
             z for z in candidates
             if left <= z.pos.x <= right and top <= z.pos.y <= bottom
         )
-    return min((z for z in candidates if z.active),
+    tiled_map = get_world_map()
+    candidates = (
+        z for z in candidates
+        if z.active and has_line_of_sight(tiled_map, player.pos.x, player.pos.y, z.pos.x, z.pos.y)
+    )
+    return min(candidates,
                key=lambda z:(z.pos.x-player.pos.x)**2+(z.pos.y-player.pos.y)**2,
                default=None)
 

@@ -13,12 +13,13 @@ try:
 except ImportError:
     PILImage = None
 from game.tilemap import get_world_map, GID_FLIP_MASK
+from game.config import ZOMBIE_ANIM_FPS, WALKER_ANIM_FPS_BOOST
 
 SPRITES={"player":(0,0,0,8,8,0),"walker":(0,8,0,8,8,0),
          "runner":(0,16,0,8,8,0),"xp":(0,24,0,3,3,0),
          "gold":(0,29,0,3,3,0),"merchant":(0,34,0,8,8,0)}
-# Pyxel palette: 10 is yellow and 13 is blue.
-FALLBACK_COLORS={"player":11,"walker":3,"runner":9,"xp":13,"gold":10,"merchant":12}
+# Fallback color if a zombie's sheet ever fails to load; matches its sprite's tint.
+FALLBACK_COLORS={"player":11,"walker":14,"runner":8,"xp":13,"gold":10,"merchant":12}
 ASSETS_LOADED=False
 BG=1; TEXT=7; PLAYER=11; ZOMBIE=3; BULLET=10; COIN=9; HEALTH=11; PANEL=0; MERCHANT=12
 def load_assets(pyxel, path=None):
@@ -143,3 +144,29 @@ PLAYER_FRAMES_PER_DIR = 8
 def get_player_sheet():
     """Load and cache the player spritesheet, parsing it only once. Returns (image, colorkey)."""
     return _load_image(PLAYER_SHEET_PATH)
+
+# The game's only two zombie classes, each a single row of 8 walk-cycle
+# frames, right-facing. There's no per-direction art, so movement left is
+# done by horizontally flipping the same frames at draw time (see
+# render.draw.draw_zombie) rather than by picking a different row.
+ZOMBIE_SHEETS = {
+    "runner": {  # fast, fragile
+        "path": os.path.join(os.path.dirname(__file__), "graphics", "Demon_A_Walk.png"),
+        "frame_width": 100, "frame_height": 100, "frames": 8,
+        "anim_fps": ZOMBIE_ANIM_FPS,
+    },
+    "walker": {  # slow, tanky -- frame rate boosted 50% over the shared baseline
+        "path": os.path.join(os.path.dirname(__file__), "graphics", "Blood Monster_A_Walk.png"),
+        "frame_width": 100, "frame_height": 100, "frames": 8,
+        "anim_fps": ZOMBIE_ANIM_FPS * WALKER_ANIM_FPS_BOOST,
+    },
+}
+
+def get_zombie_sheet(enemy_type):
+    """Load and cache enemy_type's walk spritesheet, parsing it only once.
+    Returns (image, colorkey, meta) or None if enemy_type has no sheet."""
+    meta = ZOMBIE_SHEETS.get(enemy_type)
+    if meta is None:
+        return None
+    image, colorkey = _load_image(meta["path"])
+    return image, colorkey, meta
