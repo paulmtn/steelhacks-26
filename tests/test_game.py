@@ -5,6 +5,7 @@ from game.spatial_hash import SpatialHash
 from game.state import StateMachine, GameMode, PlayerProgress
 from game.entities import Player, Pickup
 from game.systems.progression import buy, collect_pickups
+from game.systems.combat import nearest_target
 
 def test_pool_is_fixed_and_reuses():
     p=Pool(Zombie,1); z=p.acquire(); assert z and p.acquire() is None; p.release(z); assert p.acquire() is z
@@ -25,3 +26,14 @@ def test_pickups_are_magnetized_toward_player():
 
     assert pickup.pos.x < 10
     assert pickup.pos.x > 0
+
+def test_auto_target_ignores_enemies_outside_viewport():
+    player = Player(active=True, pos=Vec2(50, 50))
+    visible = Zombie(active=True, pos=Vec2(60, 50))
+    hidden = Zombie(active=True, pos=Vec2(400, 50))
+
+    assert nearest_target(
+        player,
+        [visible, hidden],
+        viewport=(0, 0, 256, 144),
+    ) is visible

@@ -9,7 +9,7 @@ def cleanup_dead(zombies, pools, progress):
             xp=pools.pickups.acquire()
             if xp: xp.pos.x,xp.pos.y,xp.amount,xp.kind=z.pos.x,z.pos.y,1,"xp"
             gold=pools.pickups.acquire()
-            if gold: gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,2,"gold"
+            if gold: gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,1,"gold"
 
 def collect_pickups(player, pickups, progress, dt=1/60):
     for item in list(pickups):

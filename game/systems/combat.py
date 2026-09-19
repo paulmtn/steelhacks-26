@@ -4,8 +4,16 @@ def fire(pool, x,y, dx,dy, speed, damage):
     b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl=x,y,dx*speed,dy*speed,1,damage,1.5
     return b
 
-def nearest_target(player, zombies, spatial_hash=None, max_range=260):
+def nearest_target(player, zombies, spatial_hash=None, max_range=260,
+                   viewport=None):
     candidates = spatial_hash.query(player.pos.x, player.pos.y, max_range) if spatial_hash else zombies
+    if viewport is not None:
+        left, top, width, height = viewport
+        right, bottom = left + width, top + height
+        candidates = (
+            z for z in candidates
+            if left <= z.pos.x <= right and top <= z.pos.y <= bottom
+        )
     return min((z for z in candidates if z.active),
                key=lambda z:(z.pos.x-player.pos.x)**2+(z.pos.y-player.pos.y)**2,
                default=None)
