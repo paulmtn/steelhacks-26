@@ -4,6 +4,28 @@ def fire(pool, x,y, dx,dy, speed, damage):
     b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl=x,y,dx*speed,dy*speed,1,damage,1.5
     return b
 
+def fire_beam(effect_pool, zombies, spatial_hash, x, y, dx, dy,
+              max_range, damage):
+    """Damage zombies intersecting an instant beam and pool its visual effect."""
+    length = (dx * dx + dy * dy) ** 0.5 or 1
+    dx, dy = dx / length, dy / length
+    for zombie in spatial_hash.query(x, y, max_range):
+        if not zombie.active:
+            continue
+        offset_x = zombie.pos.x - x
+        offset_y = zombie.pos.y - y
+        along = offset_x * dx + offset_y * dy
+        across = abs(offset_x * dy - offset_y * dx)
+        if 0 <= along <= max_range and across <= zombie.radius + 2:
+            zombie.hp -= damage
+
+    effect = effect_pool.acquire()
+    if effect:
+        effect.pos.x, effect.pos.y = x, y
+        effect.vx, effect.vy = dx, dy
+        effect.ttl = 0.12
+        effect.kind = "beam"
+
 def nearest_target(player, zombies, spatial_hash=None, max_range=260,
                    viewport=None):
     candidates = spatial_hash.query(player.pos.x, player.pos.y, max_range) if spatial_hash else zombies

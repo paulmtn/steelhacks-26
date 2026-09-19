@@ -1,5 +1,9 @@
+import math
 from render.assets import *
-from game.config import WIDTH,HEIGHT,CELL_SIZE,WORLD_WIDTH,WORLD_HEIGHT,PLAYER_ANIM_FPS
+from game.config import (
+    WIDTH, HEIGHT, CELL_SIZE, WORLD_WIDTH, WORLD_HEIGHT,
+    ORB_ORBIT_DISTANCE, ORB_BULLET_SPEED, PLAYER_ANIM_FPS,
+)
 from game.data import SHOP_ITEMS
 from game.state import GameMode
 
@@ -40,26 +44,45 @@ def draw_tilemap(p,tiled_map,ox,oy):
                 image,u,v,colorkey=source
                 p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,colorkey)
 
-def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
+def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
+               demo_mode=False):
     p.cls(BG); ox,oy=camera.x,camera.y
     draw_tilemap(p,get_world_map(),ox,oy)
     draw_sprite(p,"merchant",merchant.x-ox,merchant.y-oy)
     p.text(merchant.x-ox-14,merchant.y-oy-12,"SHOP",TEXT)
     draw_player(p,player,ox,oy)
+    for orb_index in range(progress.orb_count):
+        angle = player.orb_angle + (2 * math.pi * orb_index / progress.orb_count)
+        orb_x = player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE
+        orb_y = player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE
+        p.circ(orb_x-ox, orb_y-oy, 3, 10)
     for z in pools.zombies.active(): draw_sprite(p,z.enemy_type,z.pos.x-ox,z.pos.y-oy)
     for b in pools.bullets.active(): draw_sprite(p,"bullet",b.pos.x-ox,b.pos.y-oy)
+    for effect in pools.particles.active():
+        if effect.kind == "beam":
+            p.line(
+                effect.pos.x-ox,
+                effect.pos.y-oy,
+                effect.pos.x-ox + effect.vx * ORB_BULLET_SPEED,
+                effect.pos.y-oy + effect.vy * ORB_BULLET_SPEED,
+                10,
+            )
     for item in pools.pickups.active(): draw_sprite(p,item.kind,item.pos.x-ox,item.pos.y-oy)
     mins=int(progress.survival_time)//60; secs=int(progress.survival_time)%60
     p.text(4,3,f"{mins:02d}:{secs:02d} LV{progress.level} XP {int(progress.xp)}/{progress.xp_to_next}",TEXT)
     p.text(4,11,f"GEMS {progress.gems} GOLD {progress.coins} SCORE {progress.score}",TEXT)
-    p.rect(4,19,70,5,0); p.rect(4,19,int(70*max(0,progress.health/progress.max_health)),5,HEALTH)
+    p.rect(4,19,70,7,0)
+    p.rect(4,19,int(70*max(0,progress.health/progress.max_health)),7,HEALTH)
+    p.text(7,19,f"{int(max(0, progress.health))}/{int(progress.max_health)}",TEXT)
     if mode==GameMode.SHOP:
         cards_overlay(p, "MERCHANT", SHOP_ITEMS, show_cost=True, footer="E close")
     elif mode==GameMode.UPGRADES: overlay(p,"UPGRADES","1 Damage  2 Vitality  3 Magnet  U close")
     elif mode==GameMode.LEVEL_UP:
         cards_overlay(p, "LEVEL UP", progress.ability_choices, footer="Choose 1, 2, or 3")
     elif mode==GameMode.GAME_OVER: overlay(p,"YOU DIED","R restart")
-    if dev: p.text(4,HEIGHT-8,f"F4 +50 XP/+100 GOLD | z:{len(list(pools.zombies.active()))}",13)
+    if dev:
+        status = "DEMO 3X" if demo_mode else "NORMAL"
+        p.text(4,HEIGHT-8,f"F2 demo: {status} | z:{len(list(pools.zombies.active()))}",13)
 def overlay(p,title,hint):
     p.rect(18,52,220,42,PANEL); p.rectb(18,52,220,42,TEXT); p.text(70,60,title,10); p.text(25,78,hint,TEXT)
 

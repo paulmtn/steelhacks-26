@@ -1,6 +1,7 @@
 """Fixed-layout entity records; inactive records are reused by pools."""
 from dataclasses import dataclass
 from game.data import Vec2
+from game.config import PICKUP_LIFETIME
 
 @dataclass
 class Entity:
@@ -28,6 +29,10 @@ class Player(Entity):
     invulnerable: float = 0
     facing: int = 0       # sprite row: 0=S,1=SW,2=NW,3=N,4=NE,5=SE,6=E,7=W
     anim_time: float = 0  # seconds elapsed, used to pick the walk-cycle column
+    orb_active: bool = False
+    orb_count: int = 0
+    orb_angle: float = 0.0
+    orb_fire_timer: float = 0.0
 
 @dataclass
 class Zombie(Entity):
@@ -51,5 +56,6 @@ class Particle(Entity):
 @dataclass
 class Pickup(Entity):
     radius: float = 3
+    ttl: float = PICKUP_LIFETIME
     amount: int = 1
     kind: str = "xp"
