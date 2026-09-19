@@ -1,5 +1,6 @@
 import random
 from game.data import ABILITIES, SHOP_ITEMS
+from game.config import PICKUP_MAGNET_SPEED
 
 def cleanup_dead(zombies, pools, progress):
     for z in list(zombies):
@@ -8,16 +9,20 @@ def cleanup_dead(zombies, pools, progress):
             xp=pools.pickups.acquire()
             if xp: xp.pos.x,xp.pos.y,xp.amount,xp.kind=z.pos.x,z.pos.y,1,"xp"
             gold=pools.pickups.acquire()
-            if gold: gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,2,"gold"
+            if gold: gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,1,"gold"
 
 def collect_pickups(player, pickups, progress, dt=1/60):
     for item in list(pickups):
-        dx,dy=item.pos.x-player.pos.x,item.pos.y-player.pos.y
+        # Vector from the pickup to the player; moving along it pulls the
+        # pickup inward instead of pushing it away.
+        dx,dy=player.pos.x-item.pos.x,player.pos.y-item.pos.y
         distance=(dx*dx+dy*dy)**.5
         if distance <= player.magnet:
             if distance > 2:
-                item.pos.x += dx/distance*min(100, distance*5)*dt
-                item.pos.y += dy/distance*min(100, distance*5)*dt
+                speed = min(PICKUP_MAGNET_SPEED, distance * 12)
+                step = min(speed * dt, distance - 2)
+                item.pos.x += dx/distance*step
+                item.pos.y += dy/distance*step
             else:
                 if item.kind == "gold": progress.coins += item.amount
                 else: progress.gems += item.amount; progress.xp += item.amount

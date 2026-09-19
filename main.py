@@ -47,6 +47,8 @@ class Game:
         dx=(pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT))-(pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT))
         dy=(pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN))-(pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP))
         move_player(self.player,dx,dy,dt,PLAYER_SPEED+self.progress.speed_bonus)
+        self.camera.x=max(0,min(WORLD_WIDTH-WIDTH,self.player.pos.x-WIDTH/2))
+        self.camera.y=max(0,min(WORLD_HEIGHT-HEIGHT,self.player.pos.y-HEIGHT/2))
         self.progress.survival_time += dt; self.player.invulnerable=max(0,self.player.invulnerable-dt)
         self.spawn_clock-=dt; self.fire_clock-=dt
         if self.spawn_clock<=0:
@@ -58,7 +60,12 @@ class Game:
         for z in self.grid.query(self.player.pos.x,self.player.pos.y,24):
             if self.player.invulnerable<=0 and (z.pos.x-self.player.pos.x)**2+(z.pos.y-self.player.pos.y)**2 < 100:
                 self.progress.health-=ZOMBIE_DAMAGE; self.player.invulnerable=CONTACT_INVULN
-        target=nearest_target(self.player,zombies,self.grid)
+        target=nearest_target(
+            self.player,
+            zombies,
+            self.grid,
+            viewport=(self.camera.x, self.camera.y, WIDTH, HEIGHT),
+        )
         if target and self.fire_clock<=0:
             dx,dy=target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y; d=math.hypot(dx,dy) or 1
             for shot in range(self.progress.shots):
@@ -71,7 +78,6 @@ class Game:
         if collect_pickups(self.player,self.pools.pickups.active(),self.progress,dt): self.state.transition(GameMode.LEVEL_UP)
         self.progress.wave=1+int(self.progress.score/200)
         if (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 18**2 and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)
-        self.camera.x=max(0,min(WORLD_WIDTH-WIDTH,self.player.pos.x-WIDTH/2)); self.camera.y=max(0,min(WORLD_HEIGHT-HEIGHT,self.player.pos.y-HEIGHT/2))
         if self.progress.health<=0: self.state.transition(GameMode.GAME_OVER)
     def input(self):
         if pyxel.btnp(pyxel.KEY_F3): self.dev=not self.dev
