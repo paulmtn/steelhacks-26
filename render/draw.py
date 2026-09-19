@@ -2,7 +2,8 @@ import math
 from render.assets import *
 from game.config import (
     WIDTH, HEIGHT, CELL_SIZE, WORLD_WIDTH, WORLD_HEIGHT,
-    ORB_ORBIT_DISTANCE, ORB_BULLET_SPEED, PLAYER_ANIM_FPS,
+    MORNING_STAR_DISTANCE, ORB_ORBIT_DISTANCE,
+    ORB_BULLET_SPEED, PLAYER_ANIM_FPS, SHIELD_RADIUS,
 )
 from game.data import SHOP_ITEMS
 from game.state import GameMode
@@ -56,6 +57,23 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
         orb_x = player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE
         orb_y = player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE
         p.circ(orb_x-ox, orb_y-oy, 3, 10)
+    if progress.shield_hits > 0 or progress.shield_regen_timer > 0:
+        p.circb(
+            player.pos.x-ox,
+            player.pos.y-oy,
+            SHIELD_RADIUS,
+            12 if progress.shield_hits > 0 else 5,
+        )
+    if progress.morning_star_active:
+        for spike_index in range(progress.morning_star_count):
+            angle = progress.morning_star_angle + (
+                2 * math.pi * spike_index / progress.morning_star_count
+            )
+            star_x = player.pos.x + math.cos(angle) * MORNING_STAR_DISTANCE - ox
+            star_y = player.pos.y + math.sin(angle) * MORNING_STAR_DISTANCE - oy
+            p.circ(star_x, star_y, 4, 8)
+            p.line(star_x-5, star_y, star_x+5, star_y, 10)
+            p.line(star_x, star_y-5, star_x, star_y+5, 10)
     for z in pools.zombies.active(): draw_sprite(p,z.enemy_type,z.pos.x-ox,z.pos.y-oy)
     for b in pools.bullets.active(): draw_sprite(p,"bullet",b.pos.x-ox,b.pos.y-oy)
     for effect in pools.particles.active():
@@ -67,6 +85,29 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
                 effect.pos.y-oy + effect.vy * ORB_BULLET_SPEED,
                 10,
             )
+        elif effect.kind == "lightning":
+            start_x, start_y = effect.pos.x - ox, effect.pos.y - oy
+            end_x, end_y = start_x + effect.vx, start_y + effect.vy
+            mid_x, mid_y = (start_x + end_x) / 2, (start_y + end_y) / 2
+            perp_x, perp_y = -effect.vy, effect.vx
+            length = max(1.0, math.hypot(perp_x, perp_y))
+            offset_x, offset_y = perp_x / length * 5, perp_y / length * 5
+            p.line(start_x, start_y, mid_x + offset_x, mid_y + offset_y, 10)
+            p.line(mid_x + offset_x, mid_y + offset_y, end_x - offset_x, end_y - offset_y, 10)
+            p.line(end_x - offset_x, end_y - offset_y, end_x, end_y, 10)
+            p.circ(end_x, end_y, effect.radius, 10)
+        elif effect.kind == "hail":
+            x, y = effect.pos.x - ox, effect.pos.y - oy
+            cloud_y = y - effect.radius * 0.45
+            p.circ(x - 16, cloud_y, 8, 7)
+            p.circ(x - 5, cloud_y - 4, 10, 7)
+            p.circ(x + 8, cloud_y - 3, 10, 7)
+            p.circ(x + 18, cloud_y, 7, 7)
+            p.rect(x - 20, cloud_y, 40, 7, 7)
+            for hail_x, hail_length in ((-15, 10), (-7, 15), (2, 11), (11, 16), (18, 9)):
+                start_y = cloud_y + 7
+                p.line(x + hail_x, start_y, x + hail_x - 2, start_y + hail_length, 13)
+            p.circb(x, y, effect.radius, 13)
     for item in pools.pickups.active(): draw_sprite(p,item.kind,item.pos.x-ox,item.pos.y-oy)
     mins=int(progress.survival_time)//60; secs=int(progress.survival_time)%60
     p.text(4,3,f"{mins:02d}:{secs:02d} LV{progress.level} XP {int(progress.xp)}/{progress.xp_to_next}",TEXT)
@@ -84,20 +125,51 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
         status = "DEMO 3X" if demo_mode else "NORMAL"
         p.text(4,HEIGHT-8,f"F2 demo: {status} | z:{len(list(pools.zombies.active()))}",13)
 def overlay(p,title,hint):
-    p.rect(18,52,220,42,PANEL); p.rectb(18,52,220,42,TEXT); p.text(70,60,title,10); p.text(25,78,hint,TEXT)
+    p.rect(12,38,232,78,PANEL)
+    p.rectb(12,38,232,78,TEXT)
+    p.text(92,44,title,10)
+    for index, line in enumerate(wrap_text(hint, 38)[:4]):
+        p.text(20,62 + index * 8,line,TEXT)
 
 def cards_overlay(p, title, items, show_cost=False, footer=""):
-    """Draw three compact item/ability cards with descriptions underneath."""
-    p.rect(12,40,232,78,PANEL); p.rectb(12,40,232,78,TEXT)
-    p.text(100,45,title,10)
-    card_width = 74
+    """Draw separated cards with word-aware text wrapping."""
+    p.rect(8,30,240,90,PANEL)
+    p.rectb(8,30,240,90,TEXT)
+    p.text(92 if title != "MERCHANT" else 88,34,title,10)
+    card_width = 76
     for index, item in enumerate(items[:3]):
-        x = 16 + index * card_width
+        x = 12 + index * card_width
+        p.rectb(x,47,72,57,TEXT)
         heading = f"{index + 1} {item.name}"
         if show_cost:
             heading += f" ${item.cost}"
-        p.text(x, 59, heading[:18], TEXT)
-        lines = [item.description[i:i + 17] for i in range(0, len(item.description), 17)]
-        for line_index, line in enumerate(lines[:2]):
-            p.text(x, 68 + line_index * 7, line, TEXT)
-    p.text(78, 108, footer, TEXT)
+        for line_index, line in enumerate(wrap_text(heading, 16)[:3]):
+            p.text(x + 3, 50 + line_index * 7, line, TEXT)
+        description_y = 72 if len(wrap_text(heading, 16)) < 3 else 79
+        for line_index, line in enumerate(wrap_text(item.description, 16)[:3]):
+            p.text(x + 3, description_y + line_index * 7, line, TEXT)
+    p.text(76,108,footer,TEXT)
+
+def wrap_text(text, max_chars):
+    """Wrap at spaces, while safely splitting an unusually long word."""
+    lines = []
+    current = ""
+    for word in text.split():
+        if len(word) > max_chars:
+            if current:
+                lines.append(current)
+                current = ""
+            lines.extend(
+                word[index:index + max_chars]
+                for index in range(0, len(word), max_chars)
+            )
+        elif not current:
+            current = word
+        elif len(current) + 1 + len(word) <= max_chars:
+            current += " " + word
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines

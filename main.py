@@ -11,7 +11,10 @@ from game.pools import EntityPools
 from game.spatial_hash import SpatialHash
 from game.state import GameMode, PlayerProgress, StateMachine
 from game.systems.movement import move_player, move_zombies, update_player_facing
-from game.systems.combat import fire, fire_beam, update_bullets, nearest_target
+from game.systems.combat import (
+    damage_at_point, fire, fire_beam, hail_burst, nearest_target,
+    strike_lightning_chain, update_bullets,
+)
 from game.systems.spawn import spawn_zombie
 from game.systems.progression import cleanup_dead, collect_pickups, buy, apply_ability, buy_permanent
 from render.draw import draw_world
@@ -54,6 +57,18 @@ class Game:
         self.camera.x=max(0,min(WORLD_WIDTH-WIDTH,self.player.pos.x-WIDTH/2))
         self.camera.y=max(0,min(WORLD_HEIGHT-HEIGHT,self.player.pos.y-HEIGHT/2))
         self.progress.survival_time += dt; self.player.invulnerable=max(0,self.player.invulnerable-dt)
+        if self.progress.shield_unlocked and self.progress.shield_hits <= 0:
+            self.progress.shield_regen_timer = max(0.0, self.progress.shield_regen_timer - dt)
+            if self.progress.shield_regen_timer <= 0:
+                self.progress.shield_hits = self.progress.shield_max_hits
+                self.progress.shield_ready = True
+        if self.progress.fire_from_heaven_active:
+            self.progress.fire_from_heaven_timer -= dt
+        if self.progress.morning_star_active:
+            self.progress.morning_star_angle = (self.progress.morning_star_angle + dt * 3.0) % (2 * math.pi)
+            self.progress.morning_star_hit_timer = max(0.0, self.progress.morning_star_hit_timer - dt)
+        if self.progress.hail_active:
+            self.progress.hail_timer -= dt
         self.spawn_clock-=dt; self.fire_clock-=dt
         if self.spawn_clock<=0:
             spawn_zombie(self.pools.zombies,self.progress.wave)
@@ -63,7 +78,14 @@ class Game:
         move_zombies(zombies,self.player,dt,ZOMBIE_SPEED+self.progress.wave*.5)
         for z in self.grid.query(self.player.pos.x,self.player.pos.y,24):
             if self.player.invulnerable<=0 and (z.pos.x-self.player.pos.x)**2+(z.pos.y-self.player.pos.y)**2 < 100:
-                self.progress.health-=ZOMBIE_DAMAGE; self.player.invulnerable=CONTACT_INVULN
+                if self.progress.shield_hits > 0:
+                    self.progress.shield_hits -= 1
+                    self.progress.shield_ready = self.progress.shield_hits > 0
+                    if self.progress.shield_hits == 0:
+                        self.progress.shield_regen_timer = SHIELD_REGEN_TIME
+                    self.player.invulnerable = CONTACT_INVULN
+                else:
+                    self.progress.health-=ZOMBIE_DAMAGE; self.player.invulnerable=CONTACT_INVULN
         target=nearest_target(
             self.player,
             zombies,
@@ -95,6 +117,44 @@ class Game:
                     ORB_DAMAGE + max(0, self.progress.damage - 1),
                 )
             self.player.orb_fire_timer = ORB_FIRE_RATE
+        if self.progress.fire_from_heaven_active and self.progress.fire_from_heaven_timer <= 0:
+            for _ in range(self.progress.fire_from_heaven_count):
+                strike_lightning_chain(
+                    self.pools.particles,
+                    zombies,
+                    FIRE_FROM_HEAVEN_DAMAGE + max(0, self.progress.damage - 1),
+                    self.player.pos.x,
+                    self.player.pos.y,
+                    viewport=(self.camera.x, self.camera.y, WIDTH, HEIGHT),
+                    chain_range=FIRE_FROM_HEAVEN_CHAIN_RANGE,
+                    chain_count=FIRE_FROM_HEAVEN_CHAIN_COUNT,
+                )
+            self.progress.fire_from_heaven_timer = FIRE_FROM_HEAVEN_RATE
+        if self.progress.morning_star_active and self.progress.morning_star_hit_timer <= 0:
+            for spike_index in range(self.progress.morning_star_count):
+                angle = self.progress.morning_star_angle + (
+                    2 * math.pi * spike_index / self.progress.morning_star_count
+                )
+                star_x = self.player.pos.x + math.cos(angle) * MORNING_STAR_DISTANCE
+                star_y = self.player.pos.y + math.sin(angle) * MORNING_STAR_DISTANCE
+                damage_at_point(
+                    zombies, self.grid, star_x, star_y, 5,
+                    MORNING_STAR_DAMAGE + self.progress.morning_star_count - 1
+                    + max(0, self.progress.damage - 1),
+                )
+            self.progress.morning_star_hit_timer = MORNING_STAR_HIT_RATE
+        if self.progress.hail_active and self.progress.hail_timer <= 0:
+            hail_burst(
+                self.pools.particles,
+                zombies,
+                self.grid,
+                self.player.pos.x,
+                self.player.pos.y,
+                HAIL_RADIUS,
+                HAIL_DAMAGE + self.progress.hail_level - 1
+                + max(0, self.progress.damage - 1),
+            )
+            self.progress.hail_timer = HAIL_RATE
         update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
         for effect in self.pools.particles.active():
             effect.ttl -= dt

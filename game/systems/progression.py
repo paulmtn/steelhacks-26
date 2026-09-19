@@ -2,6 +2,7 @@ import random
 from game.data import ABILITIES, SHOP_ITEMS
 from game.config import (
     GEM_DROP_CHANCE,
+    MAX_MORNING_STARS,
     PICKUP_CLOSE_MAGNET_RADIUS,
     PICKUP_CLOSE_MAGNET_SPEED,
     PICKUP_LIFETIME,
@@ -76,14 +77,36 @@ def buy(progress, name):
     return True
 
 def apply_ability(progress, ability_name):
-    effects={"Sharpshooter":lambda: setattr(progress,"damage",progress.damage+1),
-             "Haste":lambda: setattr(progress,"fire_rate",progress.fire_rate*.88),
-             "Fleet Feet":lambda: setattr(progress,"speed_bonus",progress.speed_bonus+12),
+    effects={"Sharpshooter":lambda: (
+                 setattr(progress, "damage", progress.damage + 1),
+                 setattr(progress, "fire_rate", progress.fire_rate * .88),
+             ),
              "Magnetism":lambda: setattr(progress,"magnet",progress.magnet+32),
              "Twin Shot":lambda: setattr(progress,"shots",progress.shots+1),
              "Thick Skin":lambda: (setattr(progress,"max_health",progress.max_health+20),
                                    setattr(progress,"health",progress.health+20)),
-             "Scavenger":lambda: setattr(progress,"xp_multiplier",progress.xp_multiplier*1.2),
+             "Hedge of Protection":lambda: (
+                 setattr(progress, "shield_unlocked", True),
+                 setattr(progress, "shield_max_hits", progress.shield_max_hits + 1),
+                 setattr(progress, "shield_hits", progress.shield_hits + 1),
+                 setattr(progress, "shield_ready", True),
+                 setattr(progress, "shield_regen_timer", 0.0),
+             ),
+             "Fire from Heaven":lambda: (
+                 setattr(progress, "fire_from_heaven_active", True),
+                 setattr(progress, "fire_from_heaven_count", progress.fire_from_heaven_count + 1),
+                 setattr(progress, "fire_from_heaven_timer", 0.0),
+             ),
+             "Morning Star":lambda: (
+                 setattr(progress, "morning_star_active", True),
+                 setattr(progress, "morning_star_count", min(MAX_MORNING_STARS, progress.morning_star_count + 1)),
+                 setattr(progress, "morning_star_hit_timer", 0.0),
+             ),
+             "Storehouse of Hail":lambda: (
+                 setattr(progress, "hail_active", True),
+                 setattr(progress, "hail_level", progress.hail_level + 1),
+                 setattr(progress, "hail_timer", 0.0),
+             ),
              "Job's Orb":lambda: (
                  setattr(progress, "orb_count", min(5, progress.orb_count + 1)),
                  setattr(progress, "orb_active", True),

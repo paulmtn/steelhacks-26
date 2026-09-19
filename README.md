@@ -32,8 +32,15 @@ Press F2 to enable demo mode; zombie drops then provide 3x XP, gems, and gold.
 
 Zombies drop gems that are automatically collected within the magnet radius.
 Each zombie has a 10% chance to drop an XP gem; gems grant XP and each level
-pauses gameplay briefly for an ability choice. The ability pool includes Thick
-Skin (+20 max HP), Scavenger (+20% XP), and Job's Orb. Job's Orb circles the
+pauses gameplay briefly for an ability choice. The ability pool includes
+Sharpshooter (+1 damage and faster fire rate), Magnetism, Twin Shot, Thick
+Skin (+20 max HP), Hedge of Protection, Fire from Heaven, Morning Star,
+Storehouse of Hail, and Job's Orb. Hedge of Protection blocks one hit and
+regenerates after 10 seconds. Fire from Heaven periodically strikes a random
+zombie with lightning that chains through nearby zombies; each Fire from Heaven
+upgrade adds another simultaneous strike. Morning Star circles the player with up to eight spikes
+that become stronger with upgrades, and Storehouse of Hail periodically damages
+nearby zombies with an upgradeable area attack. Job's Orb circles the
 player and periodically fires a beam of light at the nearest visible zombie
 after it is chosen. Each additional Job's Orb choice adds another orb, up to
 five total. The beams aim horizontally, vertically, or diagonally based on the

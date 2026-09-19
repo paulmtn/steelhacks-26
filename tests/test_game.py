@@ -195,8 +195,9 @@ def test_new_abilities_modify_health_and_xp_gain():
     assert progress.max_health == 120
     assert progress.health == 120
 
-    apply_ability(progress, "Scavenger")
-    assert progress.xp_multiplier == 1.2
+    apply_ability(progress, "Sharpshooter")
+    assert progress.damage == 2
+    assert progress.fire_rate == 0.35 * 0.88
 
     assert not progress.orb_active
     apply_ability(progress, "Job's Orb")
@@ -208,6 +209,66 @@ def test_new_abilities_modify_health_and_xp_gain():
     apply_ability(progress, "Job's Orb")
     apply_ability(progress, "Job's Orb")
     assert progress.orb_count == 5
+
+def test_new_combat_abilities_are_unlockable():
+    progress = PlayerProgress()
+
+    assert apply_ability(progress, "Hedge of Protection")
+    assert progress.shield_unlocked
+    assert progress.shield_ready
+    assert progress.shield_hits == 1
+    apply_ability(progress, "Hedge of Protection")
+    assert progress.shield_max_hits == 2
+    assert progress.shield_hits == 2
+    assert apply_ability(progress, "Fire from Heaven")
+    assert progress.fire_from_heaven_active
+    assert progress.fire_from_heaven_count == 1
+    apply_ability(progress, "Fire from Heaven")
+    assert progress.fire_from_heaven_count == 2
+    assert apply_ability(progress, "Morning Star")
+    assert progress.morning_star_active
+    assert progress.morning_star_count == 1
+    apply_ability(progress, "Morning Star")
+    assert progress.morning_star_count == 2
+    for _ in range(5):
+        apply_ability(progress, "Morning Star")
+    assert progress.morning_star_count == 7
+    apply_ability(progress, "Morning Star")
+    apply_ability(progress, "Morning Star")
+    assert progress.morning_star_count == 8
+    apply_ability(progress, "Morning Star")
+    assert progress.morning_star_count == 8
+    assert apply_ability(progress, "Storehouse of Hail")
+    assert progress.hail_active
+    assert progress.hail_level == 1
+    apply_ability(progress, "Storehouse of Hail")
+    assert progress.hail_level == 2
+
+def test_ui_text_wraps_at_word_boundaries():
+    from render.draw import wrap_text
+
+    lines = wrap_text("Storehouse of Hail deals more damage", 16)
+    assert lines == ["Storehouse of", "Hail deals more", "damage"]
+
+def test_combat_ability_helpers_damage_zombies():
+    pools = EntityPools(3, 1, 3, 1)
+    first = pools.zombies.acquire()
+    first.active, first.hp, first.pos = True, 5, Vec2(30, 0)
+    second = pools.zombies.acquire()
+    second.active, second.hp, second.pos = True, 5, Vec2(0, 20)
+    grid = SpatialHash(32)
+    grid.insert(first)
+    grid.insert(second)
+
+    from game.systems.combat import damage_at_point, hail_burst, strike_random_zombie
+    assert damage_at_point((first, second), grid, 30, 0, 5, 2)
+    assert first.hp == 3
+    hail_burst(pools.particles, (first, second), grid, 0, 0, 25, 1)
+    assert second.hp == 4
+    assert strike_random_zombie(pools.particles, (first, second), 1)
+    assert first.hp < 3 or second.hp < 4
+    lightning = next(effect for effect in pools.particles.active() if effect.kind == "lightning")
+    assert lightning.ttl > 0
 
 def test_orb_beam_hits_zombies_on_horizontal_ray():
     pools = EntityPools(2, 1, 2, 1)
