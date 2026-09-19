@@ -32,6 +32,11 @@ Press F2 to enable demo mode; zombie drops then provide 3x XP, gems, and gold.
 
 Zombies drop gems that are automatically collected within the magnet radius.
 Each zombie has a 10% chance to drop an XP gem; gems grant XP and each level
-pauses gameplay briefly for an ability choice.
+pauses gameplay briefly for an ability choice. The ability pool includes Thick
+Skin (+20 max HP), Scavenger (+20% XP), and Job's Orb. Job's Orb circles the
+player and periodically fires a beam of light at the nearest visible zombie
+after it is chosen. Each additional Job's Orb choice adds another orb, up to
+five total. The beams aim horizontally, vertically, or diagonally based on the
+target's position.
 Rendering is procedural, and `render.assets.load_assets()` provides a sprite
 registry ready for replacing placeholders with image assets.

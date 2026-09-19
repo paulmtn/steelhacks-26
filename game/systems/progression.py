@@ -1,6 +1,12 @@
 import random
 from game.data import ABILITIES, SHOP_ITEMS
-from game.config import GEM_DROP_CHANCE, PICKUP_LIFETIME, PICKUP_MAGNET_SPEED
+from game.config import (
+    GEM_DROP_CHANCE,
+    PICKUP_CLOSE_MAGNET_RADIUS,
+    PICKUP_CLOSE_MAGNET_SPEED,
+    PICKUP_LIFETIME,
+    PICKUP_MAGNET_SPEED,
+)
 
 def cleanup_dead(
     zombies,
@@ -13,7 +19,7 @@ def cleanup_dead(
         if z.hp<=0:
             pools.zombies.release(z); progress.score += 10
             # Every kill grants base XP; a gem is a separate 10% bonus drop.
-            progress.xp += reward_multiplier
+            progress.xp += reward_multiplier * progress.xp_multiplier
             if random.random() < gem_drop_chance:
                 xp=pools.pickups.acquire()
                 if xp:
@@ -36,13 +42,18 @@ def collect_pickups(player, pickups, progress, dt=1/60):
         distance=(dx*dx+dy*dy)**.5
         if distance <= player.magnet:
             if distance > 2:
-                speed = min(PICKUP_MAGNET_SPEED, distance * 12)
+                if distance <= PICKUP_CLOSE_MAGNET_RADIUS:
+                    speed = min(PICKUP_CLOSE_MAGNET_SPEED, distance * 24)
+                else:
+                    speed = min(PICKUP_MAGNET_SPEED, distance * 12)
                 step = min(speed * dt, distance - 2)
                 item.pos.x += dx/distance*step
                 item.pos.y += dy/distance*step
             else:
                 if item.kind == "gold": progress.coins += item.amount
-                else: progress.gems += item.amount; progress.xp += item.amount
+                else:
+                    progress.gems += item.amount
+                    progress.xp += item.amount * progress.xp_multiplier
                 item.active=False
     if progress.xp >= progress.xp_to_next:
         progress.xp -= progress.xp_to_next
@@ -69,7 +80,14 @@ def apply_ability(progress, ability_name):
              "Haste":lambda: setattr(progress,"fire_rate",progress.fire_rate*.88),
              "Fleet Feet":lambda: setattr(progress,"speed_bonus",progress.speed_bonus+12),
              "Magnetism":lambda: setattr(progress,"magnet",progress.magnet+32),
-             "Twin Shot":lambda: setattr(progress,"shots",progress.shots+1)}
+             "Twin Shot":lambda: setattr(progress,"shots",progress.shots+1),
+             "Thick Skin":lambda: (setattr(progress,"max_health",progress.max_health+20),
+                                   setattr(progress,"health",progress.health+20)),
+             "Scavenger":lambda: setattr(progress,"xp_multiplier",progress.xp_multiplier*1.2),
+             "Job's Orb":lambda: (
+                 setattr(progress, "orb_count", min(5, progress.orb_count + 1)),
+                 setattr(progress, "orb_active", True),
+             )}
     effect=effects.get(ability_name)
     if effect: effect(); return True
     return False

@@ -44,6 +44,9 @@ ABILITIES = [
     Ability("Fleet Feet", "+12 movement speed", 0),
     Ability("Magnetism", "+32 pickup radius", 0),
     Ability("Twin Shot", "+1 auto-fire projectile", 0),
+    Ability("Thick Skin", "+20 maximum health", 0),
+    Ability("Scavenger", "+20% XP from all sources", 0),
+    Ability("Job's Orb", "orbiting orb fires at zombies", 0),
 ]
 
 SHOP_ITEMS = [

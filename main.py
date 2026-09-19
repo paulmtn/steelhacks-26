@@ -11,7 +11,7 @@ from game.pools import EntityPools
 from game.spatial_hash import SpatialHash
 from game.state import GameMode, PlayerProgress, StateMachine
 from game.systems.movement import move_player, move_zombies
-from game.systems.combat import fire, update_bullets, nearest_target
+from game.systems.combat import fire, fire_beam, update_bullets, nearest_target
 from game.systems.spawn import spawn_zombie
 from game.systems.progression import cleanup_dead, collect_pickups, buy, apply_ability, buy_permanent
 from render.draw import draw_world
@@ -48,6 +48,9 @@ class Game:
         dx=(pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT))-(pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT))
         dy=(pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN))-(pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP))
         move_player(self.player,dx,dy,dt,PLAYER_SPEED+self.progress.speed_bonus)
+        if self.progress.orb_active:
+            self.player.orb_angle = (self.player.orb_angle + dt * 2.5) % (2 * math.pi)
+            self.player.orb_fire_timer = max(0.0, self.player.orb_fire_timer - dt)
         self.camera.x=max(0,min(WORLD_WIDTH-WIDTH,self.player.pos.x-WIDTH/2))
         self.camera.y=max(0,min(WORLD_HEIGHT-HEIGHT,self.player.pos.y-HEIGHT/2))
         self.progress.survival_time += dt; self.player.invulnerable=max(0,self.player.invulnerable-dt)
@@ -74,7 +77,26 @@ class Game:
                 sx,sy=dx/d*math.cos(spread)-dy/d*math.sin(spread), dx/d*math.sin(spread)+dy/d*math.cos(spread)
                 fire(self.pools.bullets,self.player.pos.x,self.player.pos.y,sx,sy,BULLET_SPEED,self.progress.damage)
             self.fire_clock=self.progress.fire_rate
+        if target and self.progress.orb_count and self.player.orb_fire_timer <= 0:
+            for orb_index in range(self.progress.orb_count):
+                angle = self.player.orb_angle + (2 * math.pi * orb_index / self.progress.orb_count)
+                orb_x = self.player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE
+                orb_y = self.player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE
+                dx,dy=target.pos.x-orb_x,target.pos.y-orb_y
+                fire_beam(
+                    self.pools.particles,
+                    zombies,
+                    self.grid,
+                    orb_x, orb_y, dx, dy,
+                    ORB_BULLET_SPEED,
+                    ORB_DAMAGE + max(0, self.progress.damage - 1),
+                )
+            self.player.orb_fire_timer = ORB_FIRE_RATE
         update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
+        for effect in self.pools.particles.active():
+            effect.ttl -= dt
+            if effect.ttl <= 0:
+                self.pools.particles.release(effect)
         reward_multiplier = 3 if self.demo_mode else 1
         cleanup_dead(
             self.pools.zombies.active(),

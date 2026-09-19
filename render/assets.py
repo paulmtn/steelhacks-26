@@ -20,7 +20,7 @@ SPRITES={"player":(0,0,0,8,8,0),"walker":(0,8,0,8,8,0),
 # Pyxel palette: 10 is yellow and 13 is blue.
 FALLBACK_COLORS={"player":11,"walker":3,"runner":9,"xp":13,"gold":10,"merchant":12}
 ASSETS_LOADED=False
-BG=1; TEXT=7; PLAYER=11; ZOMBIE=3; BULLET=10; COIN=9; HEALTH=8; PANEL=0; MERCHANT=12
+BG=1; TEXT=7; PLAYER=11; ZOMBIE=3; BULLET=10; COIN=9; HEALTH=11; PANEL=0; MERCHANT=12
 def load_assets(pyxel, path=None):
     global ASSETS_LOADED
     if path:

@@ -27,6 +27,9 @@ class Player(Entity):
     magnet: float = 48
     shots: int = 1
     invulnerable: float = 0
+    orb_active: bool = False
+    orb_angle: float = 0.0
+    orb_fire_timer: float = 0.0
 
 @dataclass
 class Zombie(Entity):

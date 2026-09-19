@@ -7,6 +7,8 @@ from game.entities import Player, Pickup
 from game.systems.progression import buy, collect_pickups, cleanup_dead
 from game.pools import EntityPools
 from game.systems.combat import nearest_target
+from game.systems.combat import fire_beam
+from game.systems.progression import apply_ability
 
 def test_pool_is_fixed_and_reuses():
     p=Pool(Zombie,1); z=p.acquire(); assert z and p.acquire() is None; p.release(z); assert p.acquire() is z
@@ -76,3 +78,39 @@ def test_uncollected_pickups_expire_and_free_pool_slots():
     collect_pickups(player, (pickup,), progress, dt=0.1)
 
     assert not pickup.active
+
+def test_new_abilities_modify_health_and_xp_gain():
+    progress = PlayerProgress()
+    apply_ability(progress, "Thick Skin")
+    assert progress.max_health == 120
+    assert progress.health == 120
+
+    apply_ability(progress, "Scavenger")
+    assert progress.xp_multiplier == 1.2
+
+    assert not progress.orb_active
+    apply_ability(progress, "Job's Orb")
+    assert progress.orb_active
+    assert progress.orb_count == 1
+    apply_ability(progress, "Job's Orb")
+    apply_ability(progress, "Job's Orb")
+    apply_ability(progress, "Job's Orb")
+    apply_ability(progress, "Job's Orb")
+    apply_ability(progress, "Job's Orb")
+    assert progress.orb_count == 5
+
+def test_orb_beam_hits_zombies_on_horizontal_ray():
+    pools = EntityPools(2, 1, 2, 1)
+    first = pools.zombies.acquire()
+    first.active, first.hp, first.pos = True, 2, Vec2(30, 0)
+    second = pools.zombies.acquire()
+    second.active, second.hp, second.pos = True, 2, Vec2(30, 20)
+    grid = SpatialHash(32)
+    grid.insert(first)
+    grid.insert(second)
+
+    fire_beam(pools.particles, [first, second], grid, 0, 0, 1, 0, 50, 1)
+
+    assert first.hp == 1
+    assert second.hp == 2
+    assert next(pools.particles.active()).kind == "beam"
