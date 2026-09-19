@@ -9,7 +9,7 @@ def draw_sprite(p,name,x,y):
         p.blt(x-sprite[3]//2,y-sprite[4]//2,sprite[0],sprite[1],sprite[2],sprite[3],sprite[4],sprite[5])
     else:
         color=FALLBACK_COLORS.get(name,TEXT)
-        radius=max(2,(sprite[3] if sprite else 6)//2)
+        radius=max(1,(sprite[3] if sprite else 6)//2)
         p.circ(x,y,radius,color)
 
 def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
