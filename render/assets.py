@@ -133,17 +133,44 @@ def tile_source(tiled_map, gid):
             return image, col * tiled_map.tile_width, row * tiled_map.tile_height, colorkey
     return None
 
-# The player's 8-direction "walk while shooting" spritesheet: 8 columns of
-# animation frames per row, one row per facing direction, in row order
+# The player's four 48x64-frame, 8-column spritesheets, picked in
+# render.draw.draw_player by two independent states: moving vs standing
+# still, and firing (has a live auto-fire target) vs not.
+#
+#           firing                    not firing
+#   moving  Walk_while_Shooting (8 rows)  Walk_Gun (6 rows)
+#   still   Shooting (8 rows)             Idle_Gun (6 rows)
+#
+# The 8-row sheets have one row per facing direction, in order
 # S, SW, NW, N, NE, SE, E, W (see game.systems.movement._FACING_ROW_BY_BUCKET,
-# which maps aim/movement direction to the matching row index).
-PLAYER_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_while_Shooting.png")
+# which maps aim/movement direction to that same facing index). The two
+# 6-row sheets only go S, SW, NW, N, NE, SE -- no dedicated east/west pose --
+# so PLAYER_6ROW_FACING_MAP maps the facing index onto them, reusing the SE
+# row for E and the SW row for W.
 PLAYER_FRAME_WIDTH, PLAYER_FRAME_HEIGHT = 48, 64
 PLAYER_FRAMES_PER_DIR = 8
+PLAYER_6ROW_FACING_MAP = (0, 1, 2, 3, 4, 5, 5, 1)
+
+PLAYER_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_while_Shooting.png")
+WALK_GUN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_Gun.png")
+SHOOTING_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Shooting.png")
+IDLE_GUN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Idle_Gun.png")
 
 def get_player_sheet():
-    """Load and cache the player spritesheet, parsing it only once. Returns (image, colorkey)."""
+    """Load and cache the walking-while-firing spritesheet. Returns (image, colorkey)."""
     return _load_image(PLAYER_SHEET_PATH)
+
+def get_walk_gun_sheet():
+    """Load and cache the walking-not-firing spritesheet. Returns (image, colorkey)."""
+    return _load_image(WALK_GUN_SHEET_PATH)
+
+def get_shooting_sheet():
+    """Load and cache the standing-still-and-firing spritesheet. Returns (image, colorkey)."""
+    return _load_image(SHOOTING_SHEET_PATH)
+
+def get_idle_gun_sheet():
+    """Load and cache the standing-still-not-firing spritesheet. Returns (image, colorkey)."""
+    return _load_image(IDLE_GUN_SHEET_PATH)
 
 # The game's only two zombie classes, each a single row of 8 walk-cycle
 # frames, right-facing. There's no per-direction art, so movement left is
