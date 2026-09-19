@@ -13,6 +13,21 @@ class PlayerProgress:
     magnet: float = 48; shots: int = 1; xp_multiplier: float = 1.0; survival_time: float = 0
     orb_active: bool = False
     orb_count: int = 0
+    shield_unlocked: bool = False
+    shield_ready: bool = False
+    shield_hits: int = 0
+    shield_max_hits: int = 0
+    shield_regen_timer: float = 0.0
+    fire_from_heaven_active: bool = False
+    fire_from_heaven_count: int = 0
+    fire_from_heaven_timer: float = 0.0
+    morning_star_active: bool = False
+    morning_star_count: int = 0
+    morning_star_angle: float = 0.0
+    morning_star_hit_timer: float = 0.0
+    hail_active: bool = False
+    hail_level: int = 0
+    hail_timer: float = 0.0
     upgrades: dict = None; ability_choices: list = None; shop_items: list = None
     def __post_init__(self):
         self.upgrades = {} if self.upgrades is None else self.upgrades

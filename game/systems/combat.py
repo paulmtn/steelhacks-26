@@ -1,4 +1,5 @@
 from game.tilemap import get_world_map, has_line_of_sight
+import random
 
 def fire(pool, x,y, dx,dy, speed, damage):
     b=pool.acquire()
@@ -27,6 +28,77 @@ def fire_beam(effect_pool, zombies, spatial_hash, x, y, dx, dy,
         effect.vx, effect.vy = dx, dy
         effect.ttl = 0.12
         effect.kind = "beam"
+
+def strike_lightning_chain(
+    effect_pool,
+    zombies,
+    damage,
+    origin_x,
+    origin_y,
+    viewport=None,
+    chain_range=64.0,
+    chain_count=2,
+):
+    targets = [z for z in zombies if z.active]
+    if viewport is not None:
+        left, top, width, height = viewport
+        right, bottom = left + width, top + height
+        targets = [
+            z for z in targets
+            if left <= z.pos.x <= right and top <= z.pos.y <= bottom
+        ]
+    if not targets:
+        return False
+    target = random.choice(targets)
+    previous_x, previous_y = origin_x, origin_y
+    struck = []
+    for _ in range(chain_count + 1):
+        target.hp -= damage
+        effect = effect_pool.acquire()
+        if effect:
+            effect.pos.x, effect.pos.y = previous_x, previous_y
+            effect.vx, effect.vy = target.pos.x - previous_x, target.pos.y - previous_y
+            effect.radius = 12
+            effect.ttl, effect.kind = 0.45, "lightning"
+        struck.append(target)
+        candidates = [
+            zombie for zombie in targets
+            if zombie not in struck
+            and (zombie.pos.x - target.pos.x) ** 2
+            + (zombie.pos.y - target.pos.y) ** 2 <= chain_range ** 2
+        ]
+        if not candidates:
+            break
+        target = min(
+            candidates,
+            key=lambda zombie: (zombie.pos.x - target.pos.x) ** 2
+            + (zombie.pos.y - target.pos.y) ** 2,
+        )
+        previous_x, previous_y = struck[-1].pos.x, struck[-1].pos.y
+    return True
+
+def strike_random_zombie(effect_pool, zombies, damage, viewport=None):
+    """Compatibility wrapper for callers that need one on-screen strike."""
+    return strike_lightning_chain(
+        effect_pool, zombies, damage, 0, 0, viewport, chain_count=0
+    )
+
+def damage_at_point(zombies, spatial_hash, x, y, radius, damage):
+    hit = False
+    for zombie in spatial_hash.query(x, y, radius):
+        if not zombie.active:
+            continue
+        if (zombie.pos.x - x) ** 2 + (zombie.pos.y - y) ** 2 <= (radius + zombie.radius) ** 2:
+            zombie.hp -= damage
+            hit = True
+    return hit
+
+def hail_burst(effect_pool, zombies, spatial_hash, x, y, radius, damage):
+    damage_at_point(zombies, spatial_hash, x, y, radius, damage)
+    effect = effect_pool.acquire()
+    if effect:
+        effect.pos.x, effect.pos.y = x, y
+        effect.radius, effect.ttl, effect.kind = radius, 0.35, "hail"
 
 def nearest_target(player, zombies, spatial_hash=None, max_range=260,
                    viewport=None):

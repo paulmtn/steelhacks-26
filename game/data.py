@@ -43,14 +43,15 @@ class Ability:
     cost: int
 
 ABILITIES = [
-    Ability("Sharpshooter", "+1 projectile damage", 0),
-    Ability("Haste", "fire 12% faster", 0),
-    Ability("Fleet Feet", "+12 movement speed", 0),
+    Ability("Sharpshooter", "+1 damage and fire 12% faster", 0),
     Ability("Magnetism", "+32 pickup radius", 0),
     Ability("Twin Shot", "+1 auto-fire projectile", 0),
     Ability("Thick Skin", "+20 maximum health", 0),
-    Ability("Scavenger", "+20% XP from all sources", 0),
     Ability("Job's Orb", "orbiting orb fires at zombies", 0),
+    Ability("Hedge of Protection", "blocks one hit per upgrade; regenerates in 10s", 0),
+    Ability("Fire from Heaven", "adds a player-to-zombie lightning chain", 0),
+    Ability("Morning Star", "add up to 8 spikes; more spikes deal more damage", 0),
+    Ability("Storehouse of Hail", "larger hail storm; upgrades deal more damage", 0),
 ]
 
 SHOP_ITEMS = [
