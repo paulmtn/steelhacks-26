@@ -1,0 +1,124 @@
+import pyxel
+
+from .settings import (
+    EDITOR_IMAGE,
+    MAX_SOUND_LENGTH,
+    SOUND_FIELD_CURSOR_EDIT_COLOR,
+    SOUND_FIELD_CURSOR_SELECT_COLOR,
+    SOUND_FIELD_DATA_NORMAL_COLOR,
+    SOUND_FIELD_DATA_SELECT_COLOR,
+    TEXT_LABEL_COLOR,
+    clamp,
+    is_modifier_pressed,
+)
+from .widgets import Widget
+from .widgets.settings import WIDGET_HOLD_TIME, WIDGET_REPEAT_TIME
+
+# Shortcut keys that insert a value into each field row (indexed by cursor_y).
+_FIELD_KEY_TABLES = {
+    1: [pyxel.KEY_T, pyxel.KEY_S, pyxel.KEY_P, pyxel.KEY_N],
+    2: [
+        pyxel.KEY_0,
+        pyxel.KEY_1,
+        pyxel.KEY_2,
+        pyxel.KEY_3,
+        pyxel.KEY_4,
+        pyxel.KEY_5,
+        pyxel.KEY_6,
+        pyxel.KEY_7,
+    ],
+    3: [pyxel.KEY_N, pyxel.KEY_S, pyxel.KEY_V, pyxel.KEY_F, pyxel.KEY_H, pyxel.KEY_Q],
+}
+
+_FIELD_CHARS = ("TSPN", "01234567", "NSVFHQ")
+
+
+class SoundField(Widget):
+    # Variables:
+    #   is_playing_var
+    #   help_message_var
+    #
+    # Events:
+    #   none
+
+    def __init__(self, parent):
+        super().__init__(parent, 30, 149, 193, 23)
+        self.field_cursor = parent.field_cursor
+        self.get_field = parent.get_field
+        self.get_field_help_message = parent.get_field_help_message
+        self.copy_var("is_playing_var", parent)
+        self.copy_var("help_message_var", parent)
+
+        # Set event listeners
+        self.add_event_listener("mouse_down", self.__on_mouse_down)
+        self.add_event_listener("mouse_hover", self.__on_mouse_hover)
+        self.add_event_listener("update", self.__on_update)
+        self.add_event_listener("draw", self.__on_draw)
+
+    # Helpers
+
+    def _screen_to_view(self, x, y):
+        x = clamp((x - self.x - 1) // 4, 0, MAX_SOUND_LENGTH - 1)
+        y = clamp((y - self.y) // 8, 0, 2)
+        return x, y
+
+    # Event handlers
+
+    def __on_mouse_down(self, key, x, y):
+        if key != pyxel.MOUSE_BUTTON_LEFT or self.is_playing_var:
+            return
+        x, y = self._screen_to_view(x, y)
+        self.field_cursor.move_to(x, y + 1, pyxel.btn(pyxel.KEY_SHIFT))
+
+    def __on_mouse_hover(self, x, y):
+        self.help_message_var = self.get_field_help_message()
+
+    def __on_update(self):
+        cursor_y = self.field_cursor.y
+        if cursor_y < 1 or self.is_playing_var or is_modifier_pressed():
+            return
+
+        key_table = _FIELD_KEY_TABLES.get(cursor_y)
+        if key_table is None:
+            return
+        for i, key in enumerate(key_table):
+            if pyxel.btnp(key, hold=WIDGET_HOLD_TIME, repeat=WIDGET_REPEAT_TIME):
+                self.field_cursor.insert(i)
+                return
+
+    def __on_draw(self):
+        # Draw field labels
+        pyxel.text(self.x - 13, self.y + 1, "TON", TEXT_LABEL_COLOR)
+        pyxel.text(self.x - 13, self.y + 9, "VOL", TEXT_LABEL_COLOR)
+        pyxel.text(self.x - 13, self.y + 17, "EFX", TEXT_LABEL_COLOR)
+        pyxel.blt(self.x, self.y, EDITOR_IMAGE, 0, 79, 193, 23)
+
+        # Draw field data
+        data_str = [
+            "".join(_FIELD_CHARS[i][v] for v in self.get_field(i + 1)) for i in range(3)
+        ]
+        for i in range(3):
+            pyxel.text(31, 150 + i * 8, data_str[i], SOUND_FIELD_DATA_NORMAL_COLOR)
+
+        # Draw cursor
+        cursor_y = self.field_cursor.y
+        cursor_x = self.field_cursor.x
+        if self.is_playing_var or cursor_y == 0:
+            return
+
+        x = cursor_x * 4 + 31
+        y = cursor_y * 8 + 142
+        w = self.field_cursor.width * 4
+        col = (
+            SOUND_FIELD_CURSOR_SELECT_COLOR
+            if self.field_cursor.is_selecting
+            else SOUND_FIELD_CURSOR_EDIT_COLOR
+        )
+        pyxel.rect(x, y - 1, w, 7, col)
+        if cursor_x < len(data_str[cursor_y - 1]):
+            pyxel.text(
+                x,
+                y,
+                data_str[cursor_y - 1][cursor_x : cursor_x + self.field_cursor.width],
+                SOUND_FIELD_DATA_SELECT_COLOR,
+            )
