@@ -1,5 +1,5 @@
 from render.assets import *
-from game.config import WIDTH,HEIGHT,CELL_SIZE,WORLD_WIDTH,WORLD_HEIGHT
+from game.config import WIDTH,HEIGHT,WORLD_WIDTH,WORLD_HEIGHT
 from game.state import GameMode
 
 def draw_sprite(p,name,x,y):
@@ -11,14 +11,27 @@ def draw_sprite(p,name,x,y):
         radius=max(2,(sprite[3] if sprite else 6)//2)
         p.circ(x,y,radius,color)
 
+def draw_tilemap(p,tiled_map,ox,oy):
+    """Blit every tile of the world map visible at camera offset (ox,oy)."""
+    tw,th=tiled_map.tile_width,tiled_map.tile_height
+    col_start=max(0,int(ox//tw)); col_end=min(tiled_map.width,int((ox+WIDTH)//tw)+2)
+    row_start=max(0,int(oy//th)); row_end=min(tiled_map.height,int((oy+HEIGHT)//th)+2)
+    for gids in tiled_map.layers.values():
+        for row in range(row_start,row_end):
+
+            base=row*tiled_map.width
+            for col in range(col_start,col_end):
+
+                gid=gids[base+col]&GID_FLIP_MASK
+                if not gid: continue
+                source=tile_source(tiled_map,gid)
+                if source is None: continue
+                image,u,v=source
+                p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,0)
+
 def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False):
     p.cls(BG); ox,oy=camera.x,camera.y
-    # Cull a grid of city blocks; roads remain visible between buildings.
-    for cy in range(int(oy//CELL_SIZE)-1,int((oy+HEIGHT)//CELL_SIZE)+2):
-        for cx in range(int(ox//CELL_SIZE)-1,int((ox+WIDTH)//CELL_SIZE)+2):
-            x,y=cx*CELL_SIZE-ox,cy*CELL_SIZE-oy
-            if (cx+cy)%3==0: p.rect(x+3,y+3,CELL_SIZE-6,CELL_SIZE-6,5)
-            else: p.rect(x,y,CELL_SIZE,CELL_SIZE,2); p.line(x,y,x+CELL_SIZE,y,4)
+    draw_tilemap(p,get_world_map(),ox,oy)
     draw_sprite(p,"merchant",merchant.x-ox,merchant.y-oy)
     p.text(merchant.x-ox-14,merchant.y-oy-12,"SHOP",TEXT)
     draw_sprite(p,"player",player.pos.x-ox,player.pos.y-oy)
