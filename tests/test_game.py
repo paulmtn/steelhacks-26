@@ -157,6 +157,31 @@ def test_zombies_path_around_walls_to_reach_player(monkeypatch):
     else:
         raise AssertionError("zombie never reached the player around the wall")
 
+def test_zombies_route_around_a_parked_van_instead_of_jamming_against_it(monkeypatch):
+    """The van isn't part of the static Collisions layer the flow field is
+    built from, so without telling the field about it separately (see
+    game.systems.movement._obstacle_tiles) a zombie approaching it head-on
+    would just jam against its edge forever instead of detouring -- the same
+    failure test_zombies_path_around_walls_to_reach_player guards against for
+    real walls."""
+    tm = TiledMap(width=30, height=30, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * (30 * 30)}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, obstacle=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    shop = Shop(pos=Vec2(15 * 16 + 8, 15 * 16 + 8), state="parked", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+    zombie = Zombie(active=True, pos=Vec2(3 * 16 + 8, 15 * 16 + 8))
+    player = Player(active=True, pos=Vec2(27 * 16 + 8, 15 * 16 + 8))
+
+    for _ in range(3000):
+        move_zombies([zombie], player, 1 / 60, 40, obstacle=obstacle)
+        if (zombie.pos.x - player.pos.x) ** 2 + (zombie.pos.y - player.pos.y) ** 2 < 4 ** 2:
+            break
+    else:
+        raise AssertionError("zombie never reached the player around the van")
+
 def test_move_zombies_reuses_cached_field_within_the_same_tile(monkeypatch):
     """The flow field is recomputed only when the player crosses into a new
     tile -- the shared per-frame cost this whole approach relies on to stay
@@ -216,6 +241,29 @@ def test_nearest_target_ignores_enemies_behind_walls(monkeypatch):
     grid.insert(far_but_visible)
 
     assert nearest_target(player, [near_but_hidden, far_but_visible], grid, max_range=200) is far_but_visible
+
+def test_nearest_target_ignores_enemies_behind_the_van(monkeypatch):
+    """The parked van isn't a Collisions-layer wall, so has_line_of_sight
+    needs its obstacle rect passed in separately (see nearest_target's
+    obstacle parameter) to block auto-aim the same way a wall tile does --
+    otherwise the player could auto-fire straight through its own shop."""
+    tm = TiledMap(width=10, height=10, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * (10 * 10)}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    shop = Shop(pos=Vec2(5 * 16 + 8, 5 * 16 + 8), state="parked", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+    player = Player(active=True, pos=Vec2(1 * 16 + 8, 5 * 16 + 8))
+    near_but_hidden = Zombie(active=True, pos=Vec2(5 * 16 + 8, 5 * 16 + 8))   # closer, inside/behind the van
+    far_but_visible = Zombie(active=True, pos=Vec2(0 * 16 + 8, 0 * 16 + 8))   # farther, clear line of sight
+    grid = SpatialHash(32)
+    grid.insert(near_but_hidden)
+    grid.insert(far_but_visible)
+
+    assert nearest_target(
+        player, [near_but_hidden, far_but_visible], grid, max_range=200, obstacle=obstacle,
+    ) is far_but_visible
 
 def test_demo_mode_triples_pickup_rewards():
     pools = EntityPools(1, 1, 1, 2)
@@ -460,6 +508,33 @@ def test_shop_parks_then_drives_after_its_duration(monkeypatch):
     # Its new destination must be a real, walkable tile.
     col, row = int(shop.dest.x // tm.tile_width), int(shop.dest.y // tm.tile_height)
     assert not tilemap_module.is_solid_tile(tm, col, row)
+
+def test_shop_destination_always_has_room_for_the_vans_full_hitbox():
+    """A single clear tile's 3x3 neighborhood is nowhere near enough room for
+    the van's actual (up to 5-tile) footprint -- picking a destination on
+    that check alone could land it in a pocket it could never actually fit
+    into. Build a map with exactly one such trap (a 3x3 clearing boxed in by
+    walls) plus one genuinely spacious area, and confirm _pick_destination
+    always lands in the spacious one, never the trap."""
+    width = height = 20
+    tile_size = 16
+    data = [1] * (width * height)  # solid everywhere by default
+    def clear(c0, c1, r0, r1):
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                data[r * width + c] = 0
+    clear(4, 6, 4, 6)      # a 3x3 trap room -- enough for the old check, not the van
+    clear(10, 18, 10, 18)  # a genuinely spacious area
+    tm = TiledMap(width=width, height=height, tile_width=tile_size, tile_height=tile_size,
+                  layers={"Collisions": data}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+
+    current = Vec2(5 * tile_size + 8, 5 * tile_size + 8)  # inside the trap room
+    for _ in range(100):
+        dest = shop_module._pick_destination(tm, current)
+        assert shop_module._has_room_for_hitbox(tm, dest.x, dest.y)
+        col, row = int(dest.x // tile_size), int(dest.y // tile_size)
+        assert not (4 <= col <= 6 and 4 <= row <= 6)  # never the trap room
 
 def test_shop_kills_any_zombie_it_drives_over():
     shop = Shop(pos=Vec2(500, 500), dest=Vec2(500, 500), state="driving", orientation="horizontal")

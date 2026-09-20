@@ -123,6 +123,7 @@ def apply_ability(progress, ability_name):
     effects={"Sharpshooter":lambda: (
                  setattr(progress, "damage", progress.damage + 1),
                  setattr(progress, "fire_rate", progress.fire_rate * .88),
+                 setattr(progress, "sharpshooter_count", progress.sharpshooter_count + 1),
              ),
              "Twin Shot":lambda: setattr(progress,"shots",progress.shots+1),
              "Thick Skin":lambda: (setattr(progress,"max_health",progress.max_health+20),

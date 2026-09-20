@@ -38,7 +38,7 @@ from game.config import (
     SHOP_PARK_DURATION, SHOP_HITBOX_LONG, SHOP_HITBOX_SHORT, SHOP_PIVOT_DURATION,
     SHOP_STUCK_THRESHOLD, SHOP_BACKUP_DURATION, SHOP_GIVE_UP_THRESHOLD,
 )
-from game.tilemap import get_world_map, rect_collides, is_solid_tile, compute_distance_field
+from game.tilemap import get_world_map, rect_collides, compute_distance_field
 from game.systems.movement import _ORTHOGONAL_STEPS
 
 # "Twice the speed of the fast monsters" -- runner is the fast type (see game.data.ENEMY_TYPES).
@@ -67,26 +67,42 @@ def _flow_field_to(tiled_map, dest_col, dest_row):
         cache["dest"] = key
     return cache["field"]
 
+def _has_room_for_hitbox(tiled_map, x, y):
+    """True if the van's full footprint fits at (x, y) free of solid tiles,
+    in either orientation -- since _pick_destination doesn't know which way
+    the van will be facing by the time it actually arrives (that depends on
+    its last leg of travel), a destination only counts as clear if it has
+    room for the hitbox both horizontal (long side on x) and vertical (long
+    side on y)."""
+    return (
+        not rect_collides(tiled_map, x, y, SHOP_HITBOX_LONG / 2, SHOP_HITBOX_SHORT / 2)
+        and not rect_collides(tiled_map, x, y, SHOP_HITBOX_SHORT / 2, SHOP_HITBOX_LONG / 2)
+    )
+
 def _pick_destination(tiled_map, current):
-    """A random walkable tile with some clearance to actually park in, at
-    least ~10 tiles from where the van already is so every trip means
-    something. Falls back to the first walkable tile found if 50 random
-    tries can't find one (e.g. a very cramped or tiny map)."""
+    """A random walkable tile with enough room to actually park the van's
+    full hitbox there (see _has_room_for_hitbox), at least ~10 tiles from
+    where the van already is so every trip means something. Falls back to
+    the first tile found with that same room if 50 random tries can't find
+    one (e.g. a very cramped or tiny map), or the van's current spot if
+    nowhere on the map has room for it at all."""
     width, height = tiled_map.width, tiled_map.height
     tw, th = tiled_map.tile_width, tiled_map.tile_height
     cur_col, cur_row = int(current.x // tw), int(current.y // th)
     for _ in range(50):
         col = random.randrange(3, max(4, width - 3))
         row = random.randrange(3, max(4, height - 3))
-        if any(is_solid_tile(tiled_map, col + dc, row + dr) for dc in (-1, 0, 1) for dr in (-1, 0, 1)):
+        x, y = (col + .5) * tw, (row + .5) * th
+        if not _has_room_for_hitbox(tiled_map, x, y):
             continue
         if (col - cur_col) ** 2 + (row - cur_row) ** 2 < 100:
             continue
-        return Vec2((col + .5) * tw, (row + .5) * th)
+        return Vec2(x, y)
     for row in range(height):
         for col in range(width):
-            if not is_solid_tile(tiled_map, col, row):
-                return Vec2((col + .5) * tw, (row + .5) * th)
+            x, y = (col + .5) * tw, (row + .5) * th
+            if _has_room_for_hitbox(tiled_map, x, y):
+                return Vec2(x, y)
     return Vec2(current.x, current.y)
 
 def _half_extents(shop):
@@ -234,6 +250,15 @@ def update_shop(shop, dt, zombies, player):
         length = (dx * dx + dy * dy) ** .5 or 1
         dx, dy = dx / length, dy / length
 
+        # Tied to dx, dy (the actual movement vector applied below), not
+        # shop.heading -- the collision rect this drives (_half_extents) has
+        # to stay self-consistent with whichever axis the van is really
+        # moving along this tick, including during the final approach to a
+        # destination (where _steer_minimizing_turns' fallback can aim
+        # straight at the destination pixel on a different axis than
+        # heading). shop.frame, by contrast, is purely cosmetic and uses
+        # heading instead (see below) so it doesn't wobble during that same
+        # approach.
         shop.orientation = "horizontal" if abs(dx) >= abs(dy) else "vertical"
         if shop.heading != old_heading:
             target_frame = _frame_for_direction(dx, dy)
@@ -253,7 +278,16 @@ def update_shop(shop, dt, zombies, player):
             progress = 1.0 if shop.pivot_duration <= 0 else min(1.0, 1 - shop.pivot_timer / shop.pivot_duration)
             shop.frame = (shop.pivot_from_frame + round(shop.pivot_span * progress)) % SHOP_VAN_FRAME_COUNT
         else:
-            frame = _frame_for_direction(dx, dy)
+            # Derived from shop.heading rather than the raw dx, dy: right
+            # near the destination, _steer_minimizing_turns' fallback aims
+            # straight at the exact destination pixel instead of the flow
+            # field, and that raw vector's dominant axis can wobble a step
+            # or two before the van's position actually converges -- even
+            # though the discrete heading (and thus the true facing) hasn't
+            # changed. Keying off heading keeps the frame stable through
+            # that final approach instead of snapping to a momentarily
+            # wrong (e.g. 90-degree-off) frame and then correcting itself.
+            frame = _frame_for_direction(*shop.heading)
             if frame is not None:
                 shop.frame = frame
 

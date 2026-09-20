@@ -1,10 +1,10 @@
 from game.tilemap import get_world_map, has_line_of_sight
 import random
 
-def fire(pool, x,y, dx,dy, speed, damage):
+def fire(pool, x,y, dx,dy, speed, damage, radius):
     b=pool.acquire()
     if not b:return None
-    b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl=x,y,dx*speed,dy*speed,1,damage,1.5
+    b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl,b.radius=x,y,dx*speed,dy*speed,1,damage,1.5,radius
     return b
 
 def fire_beam(effect_pool, zombies, spatial_hash, x, y, dx, dy,
@@ -101,7 +101,7 @@ def hail_burst(effect_pool, zombies, spatial_hash, x, y, radius, damage):
         effect.radius, effect.ttl, effect.kind = radius, 0.35, "hail"
 
 def nearest_target(player, zombies, spatial_hash=None, max_range=260,
-                   viewport=None):
+                   viewport=None, obstacle=None):
     candidates = spatial_hash.query(player.pos.x, player.pos.y, max_range) if spatial_hash else zombies
     if viewport is not None:
         left, top, width, height = viewport
@@ -113,7 +113,7 @@ def nearest_target(player, zombies, spatial_hash=None, max_range=260,
     tiled_map = get_world_map()
     candidates = (
         z for z in candidates
-        if z.active and has_line_of_sight(tiled_map, player.pos.x, player.pos.y, z.pos.x, z.pos.y)
+        if z.active and has_line_of_sight(tiled_map, player.pos.x, player.pos.y, z.pos.x, z.pos.y, obstacle)
     )
     return min(candidates,
                key=lambda z:(z.pos.x-player.pos.x)**2+(z.pos.y-player.pos.y)**2,
