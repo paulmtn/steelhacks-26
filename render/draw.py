@@ -218,10 +218,10 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
     # z-order depending on arbitrary pool/spawn order.
     for z in sorted(pools.zombies.active(), key=lambda z: z.pos.y, reverse=True):
         draw_zombie(p,z,ox,oy)
-        if dev and z.enemy_type in ZOMBIE_BASE_TYPE:
+    #    if dev and z.enemy_type in ZOMBIE_BASE_TYPE:
             # Testing aid: outline the "_super" zombies' actual (doubled)
             # collision hitbox, since it no longer matches a plain zombie's.
-            p.rectb(z.pos.x-ox-z.radius,z.pos.y-oy-z.radius,z.radius*2,z.radius*2,TEXT)
+           # p.rectb(z.pos.x-ox-z.radius,z.pos.y-oy-z.radius,z.radius*2,z.radius*2,TEXT)
     for b in pools.bullets.active(): p.circ(b.pos.x-ox,b.pos.y-oy,round(b.radius),7)
     # "_super" zombie fire (see game.systems.combat.fire_zombie_bullets) --
     # colored to read as hostile, unlike the player's own white bullets.
