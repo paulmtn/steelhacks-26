@@ -35,8 +35,14 @@ class Game:
             near=self._near_merchant()
             if not near: self.state.transition(GameMode.PLAYING); return
             if pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.PLAYING)
-            for key,name in ((pyxel.KEY_1,'heal'),(pyxel.KEY_2,'damage'),(pyxel.KEY_3,'speed')):
-                if pyxel.btnp(key): buy(self.progress,name)
+            shop_items = [
+                item for item in SHOP_ITEMS
+                if item.name in self.progress.shop_inventory
+            ]
+            shop_keys = (pyxel.KEY_1, pyxel.KEY_2, pyxel.KEY_3, pyxel.KEY_4)
+            for index, item in enumerate(shop_items):
+                if pyxel.btnp(shop_keys[index]):
+                    buy(self.progress, item.name)
             return
         if self.state.mode == GameMode.LEVEL_UP:
             for i,key in enumerate((pyxel.KEY_1,pyxel.KEY_2,pyxel.KEY_3)):
@@ -50,7 +56,13 @@ class Game:
             return
         dx=(pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT))-(pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT))
         dy=(pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN))-(pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP))
-        move_player(self.player,dx,dy,dt,PLAYER_SPEED+self.progress.speed_bonus)
+        move_player(
+            self.player,
+            dx,
+            dy,
+            dt,
+            (PLAYER_SPEED + self.progress.speed_bonus) * self.progress.move_multiplier,
+        )
         if self.progress.orb_active:
             self.player.orb_angle = (self.player.orb_angle + dt * 2.5) % (2 * math.pi)
             self.player.orb_fire_timer = max(0.0, self.player.orb_fire_timer - dt)
@@ -170,7 +182,13 @@ class Game:
         if collect_pickups(self.player,self.pools.pickups.active(),self.progress,dt): self.state.transition(GameMode.LEVEL_UP)
         self.progress.wave=1+int(self.progress.score/200)
         if (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 18**2 and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)
-        if self.progress.health<=0: self.state.transition(GameMode.GAME_OVER)
+        if self.progress.health <= 0:
+            if self.progress.extra_lives > 0:
+                self.progress.extra_lives -= 1
+                self.progress.health = self.progress.max_health
+                self.player.invulnerable = CONTACT_INVULN
+            else:
+                self.state.transition(GameMode.GAME_OVER)
     def input(self):
         if pyxel.btnp(pyxel.KEY_F3): self.dev=not self.dev
         if pyxel.btnp(pyxel.KEY_F2): self.demo_mode=not self.demo_mode

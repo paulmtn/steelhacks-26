@@ -128,11 +128,20 @@ def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
     mins=int(progress.survival_time)//60; secs=int(progress.survival_time)%60
     p.text(4,3,f"{mins:02d}:{secs:02d} LV{progress.level} XP {int(progress.xp)}/{progress.xp_to_next}",TEXT)
     p.text(4,11,f"GEMS {progress.gems} GOLD {progress.coins} SCORE {progress.score}",TEXT)
+    if progress.extra_lives > 0:
+        p.circ(7,31,3,8)
+        p.circ(12,31,3,8)
+        p.tri(4,32,15,32,9,39,8)
+        p.text(18,29,f"x{progress.extra_lives}",TEXT)
     p.rect(4,19,70,7,0)
     p.rect(4,19,int(70*max(0,progress.health/progress.max_health)),7,HEALTH)
     p.text(7,19,f"{int(max(0, progress.health))}/{int(progress.max_health)}",TEXT)
     if mode==GameMode.SHOP:
-        cards_overlay(p, "MERCHANT", SHOP_ITEMS, show_cost=True, footer="E close")
+        shop_items = [
+            item for item in SHOP_ITEMS
+            if item.name in progress.shop_inventory
+        ]
+        cards_overlay(p, "MERCHANT", shop_items, show_cost=True, footer="E close", progress=progress)
     elif mode==GameMode.UPGRADES: overlay(p,"UPGRADES","1 Damage  2 Vitality  3 Magnet  U close")
     elif mode==GameMode.LEVEL_UP:
         cards_overlay(p, "LEVEL UP", progress.ability_choices, footer="Choose 1, 2, or 3")
@@ -147,24 +156,54 @@ def overlay(p,title,hint):
     for index, line in enumerate(wrap_text(hint, 38)[:4]):
         p.text(20,62 + index * 8,line,TEXT)
 
-def cards_overlay(p, title, items, show_cost=False, footer=""):
-    """Draw separated cards with word-aware text wrapping."""
-    p.rect(8,30,240,90,PANEL)
-    p.rectb(8,30,240,90,TEXT)
-    p.text(92 if title != "MERCHANT" else 88,34,title,10)
+def cards_overlay(p, title, items, show_cost=False, footer="", progress=None):
+    """Draw bounded level-up cards or a four-item shop grid."""
+    if show_cost:
+        shop_grid(p, title, items, progress, footer)
+        return
+
+    p.rect(8,38,240,84,PANEL)
+    p.rectb(8,38,240,84,TEXT)
+    p.text(92,43,title,10)
+    visible_items = items[:5] if show_cost else items[:3]
     card_width = 76
-    for index, item in enumerate(items[:3]):
-        x = 12 + index * card_width
-        p.rectb(x,47,72,57,TEXT)
+    card_height = 55
+    for index, item in enumerate(visible_items):
+        x = 10 + index * card_width
+        y = 57
+        p.rectb(x,y,card_width - 4,card_height,TEXT)
         heading = f"{index + 1} {item.name}"
-        if show_cost:
-            heading += f" ${item.cost}"
         for line_index, line in enumerate(wrap_text(heading, 16)[:3]):
-            p.text(x + 3, 50 + line_index * 7, line, TEXT)
-        description_y = 72 if len(wrap_text(heading, 16)) < 3 else 79
+            p.text(x + 3, y + 3 + line_index * 6, line, TEXT)
+        description_y = y + 22
         for line_index, line in enumerate(wrap_text(item.description, 16)[:3]):
-            p.text(x + 3, description_y + line_index * 7, line, TEXT)
-    p.text(76,108,footer,TEXT)
+            p.text(x + 3, description_y + line_index * 6, line, TEXT)
+    p.text(72,116,footer,TEXT)
+
+def shop_grid(p, title, items, progress, footer):
+    """Draw the four selected shop items as a compact 2x2 grid."""
+    p.rect(4,26,248,112,PANEL)
+    p.rectb(4,26,248,112,TEXT)
+    p.text(94,31,title,10)
+    card_width, card_height = 120, 42
+    for index, item in enumerate(items[:4], 1):
+        row, column = divmod(index - 1, 2)
+        x, y = 7 + column * card_width, 43 + row * card_height
+        p.rectb(x, y, card_width - 6, card_height - 3, TEXT)
+        purchases = progress.shop_purchases.get(item.name, 0)
+        cost = math.ceil(item.cost * (1.1 ** purchases))
+        currency = "gems" if item.currency == "gems" else "$"
+        stock = (
+            f"{progress.shop_items.get(item.name, 0)} left"
+            if item.stock is not None else "unlimited"
+        )
+        heading = f"{index} {item.name} {cost}{currency}"
+        for line_index, line in enumerate(wrap_text(heading, 21)[:2]):
+            p.text(x + 4, y + 3 + line_index * 6, line, TEXT)
+        for line_index, line in enumerate(wrap_text(item.description, 21)[:2]):
+            p.text(x + 4, y + 16 + line_index * 6, line, TEXT)
+        p.text(x + 4, y + 31, stock, TEXT)
+    p.text(42,130,"1-4 buy item    E close",TEXT)
 
 def wrap_text(text, max_chars):
     """Wrap at spaces, while safely splitting an unusually long word."""

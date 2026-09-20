@@ -1,6 +1,8 @@
 """Explicit game state machine and player progression."""
 from enum import Enum, auto
 from dataclasses import dataclass
+import random
+from game.data import SHOP_ITEMS
 
 class GameMode(Enum):
     PLAYING = auto(); SHOP = auto(); LEVEL_UP = auto(); UPGRADES = auto(); GAME_OVER = auto()
@@ -11,6 +13,8 @@ class PlayerProgress:
     xp: float = 0; level: int = 1; xp_to_next: float = 10
     fire_rate: float = 0.35; damage: int = 1; speed_bonus: float = 0
     magnet: float = 48; shots: int = 1; xp_multiplier: float = 1.0; survival_time: float = 0
+    move_multiplier: float = 1.0
+    extra_lives: int = 0
     orb_active: bool = False
     orb_count: int = 0
     shield_unlocked: bool = False
@@ -28,11 +32,21 @@ class PlayerProgress:
     hail_active: bool = False
     hail_level: int = 0
     hail_timer: float = 0.0
-    upgrades: dict = None; ability_choices: list = None; shop_items: list = None
+    upgrades: dict = None; ability_choices: list = None; shop_items: dict = None
+    shop_purchases: dict = None
+    shop_inventory: list = None
     def __post_init__(self):
         self.upgrades = {} if self.upgrades is None else self.upgrades
         self.ability_choices = [] if self.ability_choices is None else self.ability_choices
-        self.shop_items = [] if self.shop_items is None else self.shop_items
+        self.shop_items = (
+            {item.name: item.stock for item in SHOP_ITEMS}
+            if self.shop_items is None else self.shop_items
+        )
+        self.shop_purchases = {} if self.shop_purchases is None else self.shop_purchases
+        self.shop_inventory = (
+            [item.name for item in random.sample(SHOP_ITEMS, 4)]
+            if self.shop_inventory is None else self.shop_inventory
+        )
 
 class StateMachine:
     def __init__(self):     self.mode = GameMode.PLAYING

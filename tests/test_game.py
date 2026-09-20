@@ -1,6 +1,6 @@
 from game.pools import Pool
 from game.entities import Zombie
-from game.data import Vec2
+from game.data import ABILITIES, SHOP_ITEMS, Vec2
 from game.spatial_hash import SpatialHash
 from game.state import StateMachine, GameMode, PlayerProgress
 from game.entities import Player, Pickup
@@ -23,7 +23,8 @@ def test_spatial_hash_candidates():
 
 def test_state_and_merchant():
     s=StateMachine(); s.transition(GameMode.PLAYING); assert s.mode is GameMode.PLAYING
-    p=PlayerProgress(coins=12); assert buy(p,'damage'); assert p.damage==2 and p.coins==0
+    p=PlayerProgress(coins=12, shop_inventory=["Arsenal"])
+    assert buy(p,'damage'); assert p.damage==2 and p.coins==0
 
 def test_pickups_are_magnetized_toward_player():
     player = Player(active=True, pos=Vec2(0, 0), magnet=50)
@@ -34,6 +35,36 @@ def test_pickups_are_magnetized_toward_player():
 
     assert pickup.pos.x < 10
     assert pickup.pos.x > 0
+
+def test_shop_stock_prices_and_gem_items():
+    progress = PlayerProgress(
+        coins=100,
+        gems=40,
+        shop_inventory=["Arsenal", "Extra Life", "Double XP", "Boots"],
+    )
+    assert buy(progress, "Arsenal")
+    assert progress.damage == 2
+    assert progress.shop_items["Arsenal"] == 9
+    first_coins = progress.coins
+    assert buy(progress, "Arsenal")
+    assert first_coins - progress.coins == 14
+    assert buy(progress, "Extra Life")
+    assert progress.extra_lives == 1
+    assert progress.shop_items["Extra Life"] == 0
+    assert not buy(progress, "Extra Life")
+    assert buy(progress, "Double XP")
+    assert progress.xp_multiplier == 2.0
+    assert progress.shop_items["Double XP"] == 0
+    assert not buy(progress, "Double XP")
+
+def test_shop_has_four_randomly_selected_items():
+    progress = PlayerProgress()
+    assert len(progress.shop_inventory) == 4
+    assert len(set(progress.shop_inventory)) == 4
+    assert set(progress.shop_inventory).issubset({item.name for item in SHOP_ITEMS})
+
+def test_magnetism_is_not_a_level_up_ability():
+    assert all(ability.name != "Magnetism" for ability in ABILITIES)
 
 def _find_interior_solid_tile():
     """A Collisions-layer tile with enough clearance on both sides for a

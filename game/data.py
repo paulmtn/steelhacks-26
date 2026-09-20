@@ -41,10 +41,11 @@ class Ability:
     name: str
     description: str
     cost: int
+    currency: str = "coins"
+    stock: int | None = 10
 
 ABILITIES = [
     Ability("Sharpshooter", "+1 damage and fire 12% faster", 0),
-    Ability("Magnetism", "+32 pickup radius", 0),
     Ability("Twin Shot", "+1 auto-fire projectile", 0),
     Ability("Thick Skin", "+20 maximum health", 0),
     Ability("Job's Orb", "orbiting orb fires at zombies", 0),
@@ -57,5 +58,7 @@ ABILITIES = [
 SHOP_ITEMS = [
     Ability("Medkit", "restore 35 health", 8),
     Ability("Arsenal", "+1 damage", 12),
-    Ability("Boots", "+10 movement speed", 14),
+    Ability("Boots", "+3% movement speed", 14),
+    Ability("Extra Life", "revive once when health reaches zero", 20, "gems", 1),
+    Ability("Double XP", "double XP gained for this run", 15, "gems", 1),
 ]
