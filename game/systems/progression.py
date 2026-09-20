@@ -8,6 +8,7 @@ from game.config import (
     PICKUP_CLOSE_MAGNET_SPEED,
     PICKUP_LIFETIME,
     PICKUP_MAGNET_SPEED,
+    ZOMBIE_DEATH_DURATION,
 )
 
 def cleanup_dead(
@@ -17,9 +18,14 @@ def cleanup_dead(
     reward_multiplier=1,
     gem_drop_chance=GEM_DROP_CHANCE,
 ):
+    """Grant rewards for zombies whose hp just dropped to 0 or below, and
+    start their death animation -- it isn't released from the pool (and so
+    keeps blocking/being drawn) until that animation finishes; see
+    tick_zombie_hit_effects."""
     for z in list(zombies):
-        if z.hp<=0:
-            pools.zombies.release(z); progress.score += 10
+        if z.hp<=0 and not z.dying:
+            z.dying=True; z.death_timer=ZOMBIE_DEATH_DURATION
+            progress.score += 10
             # Every kill grants base XP; a gem is a separate 10% bonus drop.
             progress.xp += reward_multiplier * progress.xp_multiplier
             if random.random() < gem_drop_chance:
@@ -31,6 +37,19 @@ def cleanup_dead(
             if gold:
                 gold.pos.x,gold.pos.y,gold.amount,gold.kind=z.pos.x+3,z.pos.y+3,reward_multiplier,"gold"
                 gold.ttl=PICKUP_LIFETIME
+
+def tick_zombie_hit_effects(zombies, pool, dt):
+    """Count down each zombie's "hurt" flash and "death" animation timers,
+    releasing a zombie from the pool once its death animation finishes
+    playing (see cleanup_dead, which starts it) rather than the instant it
+    reaches 0 hp."""
+    for z in zombies:
+        if z.dying:
+            z.death_timer -= dt
+            if z.death_timer <= 0:
+                pool.release(z)
+        elif z.hurt_timer > 0:
+            z.hurt_timer = max(0.0, z.hurt_timer - dt)
 
 def collect_pickups(player, pickups, progress, dt=1/60):
     for item in list(pickups):

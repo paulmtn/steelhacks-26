@@ -17,7 +17,7 @@ from game.systems.combat import (
 )
 from game.systems.spawn import spawn_zombie
 from game.systems.shop import update_shop, shop_obstacle, shop_touching
-from game.systems.progression import cleanup_dead, collect_pickups, buy, apply_ability, buy_permanent
+from game.systems.progression import cleanup_dead, collect_pickups, buy, apply_ability, buy_permanent, tick_zombie_hit_effects
 from render.draw import draw_world
 from render.assets import load_assets
 
@@ -90,7 +90,13 @@ class Game:
         if self.spawn_clock<=0:
             spawn_zombie(self.pools.zombies,self.progress.wave)
             self.spawn_clock=max(.12,SPAWN_INTERVAL/(1+self.progress.survival_time/90))
-        zombies=list(self.pools.zombies.active()); self.grid.clear()
+        # Zombies mid-death-animation don't act or fight anymore -- excluded
+        # from grid/movement/targeting/damage -- but zombies_all (unfiltered)
+        # still gets drawn and still needs its hurt/death timers ticked down.
+        zombies_all=list(self.pools.zombies.active())
+        zombies=[z for z in zombies_all if not z.dying]
+        hp_before={id(z): z.hp for z in zombies}
+        self.grid.clear()
         for z in zombies: self.grid.insert(z)
         move_zombies(zombies,self.player,dt,ZOMBIE_SPEED+self.progress.wave*.5,obstacle=obstacle)
         if update_shop(self.shop,dt,zombies,self.player):
@@ -184,17 +190,23 @@ class Game:
             )
             self.progress.hail_timer = HAIL_RATE
         update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
+        # Anything that lost hp this frame but is still alive flashes its
+        # "hurt" sheet; the ones that hit 0 are instead marked dying below.
+        for z in zombies:
+            if z.hp < hp_before[id(z)] and z.hp > 0:
+                z.hurt_timer = ZOMBIE_HURT_DURATION
         for effect in self.pools.particles.active():
             effect.ttl -= dt
             if effect.ttl <= 0:
                 self.pools.particles.release(effect)
         reward_multiplier = 3 if self.demo_mode else 1
         cleanup_dead(
-            self.pools.zombies.active(),
+            zombies,
             self.pools,
             self.progress,
             reward_multiplier,
         )
+        tick_zombie_hit_effects(zombies_all, self.pools.zombies, dt)
         if collect_pickups(self.player,self.pools.pickups.active(),self.progress,dt): self.state.transition(GameMode.LEVEL_UP)
         self.progress.wave=1+int(self.progress.score/200)
         if self._near_shop() and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)

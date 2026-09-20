@@ -2,10 +2,13 @@
 from game.entities import Zombie, Bullet, Particle, Pickup
 
 class Pool:
-    def __init__(self, factory, capacity): self.items = [factory() for _ in range(capacity)]
+    def __init__(self, factory, capacity):
+        self.items = [factory() for _ in range(capacity)]
     def acquire(self):
         for item in self.items:
-            if not item.active: item.active = True; return item
+            if not item.active:
+                item.active = True
+                return item
         return None
     def release(self, item): item.active = False
     def active(self): return (x for x in self.items if x.active)

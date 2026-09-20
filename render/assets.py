@@ -13,7 +13,7 @@ try:
 except ImportError:
     PILImage = None
 from game.tilemap import get_world_map, GID_FLIP_MASK
-from game.config import ZOMBIE_ANIM_FPS, WALKER_ANIM_FPS_BOOST
+from game.config import ZOMBIE_ANIM_FPS, WALKER_ANIM_FPS_BOOST, ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION
 
 SPRITES={"player":(0,0,0,8,8,0),"walker":(0,8,0,8,8,0),
          "runner":(0,16,0,8,8,0),"xp":(0,24,0,3,3,0),
@@ -172,27 +172,66 @@ def get_idle_gun_sheet():
     """Load and cache the standing-still-not-firing spritesheet. Returns (image, colorkey)."""
     return _load_image(IDLE_GUN_SHEET_PATH)
 
-# The game's only two zombie classes, each a single row of 8 walk-cycle
-# frames, right-facing. There's no per-direction art, so movement left is
-# done by horizontally flipping the same frames at draw time (see
-# render.draw.draw_zombie) rather than by picking a different row.
+# The game's only two zombie classes, each with three single-row spritesheets
+# -- walking (8 frames, looping), taking a hit and surviving (4 frames,
+# played once), and dying (4 frames, played once) -- all right-facing, so
+# movement left is done by horizontally flipping at draw time (see
+# render.draw.draw_zombie) rather than by picking a different row. The hurt
+# and death sheets play at the same rate for both types regardless of
+# walker's walk-cycle speed boost, since they're not about walking pace.
+_ZOMBIE_HURT_FRAMES = 4
+_ZOMBIE_DEATH_FRAMES = 4
+_ZOMBIE_HURT_FPS = _ZOMBIE_HURT_FRAMES / ZOMBIE_HURT_DURATION
+_ZOMBIE_DEATH_FPS = _ZOMBIE_DEATH_FRAMES / ZOMBIE_DEATH_DURATION
+
+def _zombie_graphics(name):
+    return os.path.join(os.path.dirname(__file__), "graphics", name)
+
 ZOMBIE_SHEETS = {
     "runner": {  # fast, fragile
-        "path": os.path.join(os.path.dirname(__file__), "graphics", "Demon_A_Walk.png"),
-        "frame_width": 100, "frame_height": 100, "frames": 8,
-        "anim_fps": ZOMBIE_ANIM_FPS,
+        "walk": {
+            "path": _zombie_graphics("Demon_A_Walk.png"),
+            "frame_width": 100, "frame_height": 100, "frames": 8,
+            "anim_fps": ZOMBIE_ANIM_FPS,
+        },
+        "hurt": {
+            "path": _zombie_graphics("Demon_A_Hurt.png"),
+            "frame_width": 100, "frame_height": 100, "frames": _ZOMBIE_HURT_FRAMES,
+            "anim_fps": _ZOMBIE_HURT_FPS,
+        },
+        "death": {
+            "path": _zombie_graphics("Demon_A_Death.png"),
+            "frame_width": 100, "frame_height": 100, "frames": _ZOMBIE_DEATH_FRAMES,
+            "anim_fps": _ZOMBIE_DEATH_FPS,
+        },
     },
-    "walker": {  # slow, tanky -- frame rate boosted 50% over the shared baseline
-        "path": os.path.join(os.path.dirname(__file__), "graphics", "Blood Monster_A_Walk.png"),
-        "frame_width": 100, "frame_height": 100, "frames": 8,
-        "anim_fps": ZOMBIE_ANIM_FPS * WALKER_ANIM_FPS_BOOST,
+    "walker": {  # slow, tanky -- walk frame rate boosted 50% over the shared baseline
+        "walk": {
+            "path": _zombie_graphics("Blood Monster_A_Walk.png"),
+            "frame_width": 100, "frame_height": 100, "frames": 8,
+            "anim_fps": ZOMBIE_ANIM_FPS * WALKER_ANIM_FPS_BOOST,
+        },
+        "hurt": {
+            "path": _zombie_graphics("Blood Monster_A_Hurt.png"),
+            "frame_width": 100, "frame_height": 100, "frames": _ZOMBIE_HURT_FRAMES,
+            "anim_fps": _ZOMBIE_HURT_FPS,
+        },
+        "death": {
+            "path": _zombie_graphics("Blood Monster_A_Death.png"),
+            "frame_width": 100, "frame_height": 100, "frames": _ZOMBIE_DEATH_FRAMES,
+            "anim_fps": _ZOMBIE_DEATH_FPS,
+        },
     },
 }
 
-def get_zombie_sheet(enemy_type):
-    """Load and cache enemy_type's walk spritesheet, parsing it only once.
-    Returns (image, colorkey, meta) or None if enemy_type has no sheet."""
-    meta = ZOMBIE_SHEETS.get(enemy_type)
+def get_zombie_sheet(enemy_type, variant="walk"):
+    """Load and cache enemy_type's spritesheet for variant ("walk", "hurt",
+    or "death"), parsing it only once. Returns (image, colorkey, meta) or
+    None if enemy_type/variant has no sheet."""
+    type_sheets = ZOMBIE_SHEETS.get(enemy_type)
+    if type_sheets is None:
+        return None
+    meta = type_sheets.get(variant)
     if meta is None:
         return None
     image, colorkey = _load_image(meta["path"])
