@@ -44,6 +44,9 @@ class Zombie(Entity):
     enemy_type: str = "walker"
     facing_right: bool = True  # mirrors the (right-facing) walk sprite when moving left
     anim_time: float = 0       # seconds elapsed, scaled by speed, picks the walk-cycle frame
+    hurt_timer: float = 0.0    # counts down while showing the brief "hurt" flash sheet
+    dying: bool = False        # true from the killing blow until its death animation finishes
+    death_timer: float = 0.0   # counts down the "death" sheet; released from the pool at 0
 
 @dataclass
 class Bullet(Entity):

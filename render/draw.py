@@ -4,6 +4,7 @@ from game.config import (
     WIDTH, HEIGHT, CELL_SIZE, WORLD_WIDTH, WORLD_HEIGHT,
     MORNING_STAR_DISTANCE, ORB_ORBIT_DISTANCE,
     ORB_BULLET_SPEED, PLAYER_ANIM_FPS, SHIELD_RADIUS,
+    ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION,
 )
 from game.data import SHOP_ITEMS
 from game.state import GameMode
@@ -40,17 +41,31 @@ def draw_player(p,player,ox,oy):
     p.blt(x-PLAYER_FRAME_WIDTH//2,y-PLAYER_FRAME_HEIGHT+32,sheet,u,v,PLAYER_FRAME_WIDTH,PLAYER_FRAME_HEIGHT,colorkey)
 
 def draw_zombie(p,zombie,ox,oy):
-    """Draw a zombie's walk-cycle sprite (walker/runner), centered on its
-    world position and horizontally flipped to face its direction of travel --
-    the sheets only have right-facing frames. Falls back to a colored circle
-    if the sheet ever fails to load."""
+    """Draw a zombie's current-state sprite -- walking (looping), briefly
+    flashing its "hurt" sheet after taking damage and surviving, or playing
+    its "death" sheet once while it's dying -- centered on its world position
+    and horizontally flipped to face its direction of travel, since the
+    sheets only have right-facing frames. Falls back to a colored circle if
+    a sheet ever fails to load."""
     x,y=zombie.pos.x-ox,zombie.pos.y-oy
-    sheet_info=get_zombie_sheet(zombie.enemy_type)
+    if zombie.dying:
+        variant,elapsed=("death",ZOMBIE_DEATH_DURATION-zombie.death_timer)
+    elif zombie.hurt_timer>0:
+        variant,elapsed=("hurt",ZOMBIE_HURT_DURATION-zombie.hurt_timer)
+    else:
+        variant,elapsed=("walk",None)
+    sheet_info=get_zombie_sheet(zombie.enemy_type,variant)
     if sheet_info is None:
         draw_sprite(p,zombie.enemy_type,x,y); return
     sheet,colorkey,meta=sheet_info
     fw,fh,frames=meta["frame_width"],meta["frame_height"],meta["frames"]
-    frame=int(zombie.anim_time*meta["anim_fps"])%frames
+    if variant=="walk":
+        frame=int(zombie.anim_time*meta["anim_fps"])%frames
+    else:
+        # Hurt/death play once and hold on the last frame, rather than
+        # looping -- they end when their timer runs out (hurt, back to
+        # walking) or the zombie is removed (death), not by wrapping around.
+        frame=min(frames-1,int(max(0.0,elapsed)*meta["anim_fps"]))
     u=frame*fw
     w=fw if zombie.facing_right else -fw
     p.blt(x-fw//2,y-fh//2,sheet,u,0,w,fh,colorkey)

@@ -4,7 +4,7 @@ from game.data import ABILITIES, SHOP_ITEMS, Vec2
 from game.spatial_hash import SpatialHash
 from game.state import StateMachine, GameMode, PlayerProgress
 from game.entities import Player, Pickup
-from game.systems.progression import buy, collect_pickups, cleanup_dead
+from game.systems.progression import buy, collect_pickups, cleanup_dead, tick_zombie_hit_effects
 from game.pools import EntityPools
 from game.systems.combat import nearest_target
 from game.systems.movement import move_player, move_zombies
@@ -23,6 +23,7 @@ from game.systems.shop import (
 from game.config import (
     SHOP_PARK_DURATION, SHOP_HITBOX_LONG, SHOP_HITBOX_SHORT, SHOP_PIVOT_DURATION,
     SHOP_STUCK_THRESHOLD, SHOP_GIVE_UP_THRESHOLD,
+    ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION,
 )
 
 def test_pool_is_fixed_and_reuses():
@@ -244,6 +245,58 @@ def test_every_kill_grants_xp_without_a_gem():
 
     assert progress.xp == 1
     assert list(pools.pickups.active())[0].kind == "gold"
+
+def test_cleanup_dead_marks_dying_instead_of_releasing_immediately():
+    pools = EntityPools(1, 1, 1, 1)
+    zombie = pools.zombies.acquire()
+    zombie.active = True
+    zombie.hp = 0
+    progress = PlayerProgress()
+
+    cleanup_dead([zombie], pools, progress, gem_drop_chance=0)
+
+    assert zombie.dying
+    assert zombie.death_timer == ZOMBIE_DEATH_DURATION
+    assert zombie.active  # still occupies its pool slot, still drawable
+    assert list(pools.zombies.active()) == [zombie]
+
+def test_cleanup_dead_does_not_double_reward_an_already_dying_zombie():
+    pools = EntityPools(1, 1, 1, 1)
+    zombie = pools.zombies.acquire()
+    zombie.active = True
+    zombie.hp = 0
+    progress = PlayerProgress()
+
+    cleanup_dead([zombie], pools, progress, gem_drop_chance=0)
+    cleanup_dead([zombie], pools, progress, gem_drop_chance=0)
+
+    assert progress.xp == 1
+
+def test_tick_zombie_hit_effects_releases_zombie_after_death_animation():
+    pools = EntityPools(1, 1, 1, 1)
+    zombie = pools.zombies.acquire()
+    zombie.active = True
+    zombie.hp = 0
+    progress = PlayerProgress()
+    cleanup_dead([zombie], pools, progress, gem_drop_chance=0)
+
+    tick_zombie_hit_effects([zombie], pools.zombies, dt=ZOMBIE_DEATH_DURATION / 2)
+    assert zombie.active  # animation not finished yet
+
+    tick_zombie_hit_effects([zombie], pools.zombies, dt=ZOMBIE_DEATH_DURATION / 2 + 0.01)
+    assert not zombie.active  # released once the death animation finishes
+
+def test_tick_zombie_hit_effects_decays_hurt_timer_without_releasing():
+    zombie = Zombie(active=True, hurt_timer=ZOMBIE_HURT_DURATION)
+    pool = Pool(Zombie, 1)
+
+    tick_zombie_hit_effects([zombie], pool, dt=ZOMBIE_HURT_DURATION / 2)
+    assert 0 < zombie.hurt_timer < ZOMBIE_HURT_DURATION
+    assert zombie.active
+
+    tick_zombie_hit_effects([zombie], pool, dt=ZOMBIE_HURT_DURATION)
+    assert zombie.hurt_timer == 0
+    assert zombie.active  # surviving a hit never releases the zombie
 
 def test_uncollected_pickups_expire_and_free_pool_slots():
     player = Player(active=True, pos=Vec2(0, 0), magnet=0)
@@ -683,3 +736,16 @@ def test_van_gives_up_and_repicks_after_too_much_cumulative_backing_up(monkeypat
     # Giving up resets the cumulative counter so the fresh destination gets
     # its own full budget of backing-up attempts.
     assert shop.trouble_time == 0.0
+
+def test_zombie_sheets_have_matching_hurt_and_death_variants_for_both_types():
+    import os
+    from render.assets import ZOMBIE_SHEETS
+    for enemy_type in ("walker", "runner"):
+        variants = ZOMBIE_SHEETS[enemy_type]
+        assert set(variants) == {"walk", "hurt", "death"}
+        assert variants["walk"]["frames"] == 8
+        for variant in ("hurt", "death"):
+            meta = variants[variant]
+            assert meta["frames"] == 4
+            assert meta["frame_width"] == meta["frame_height"] == 100
+            assert os.path.isfile(meta["path"])
