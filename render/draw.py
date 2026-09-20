@@ -55,6 +55,17 @@ def draw_zombie(p,zombie,ox,oy):
     w=fw if zombie.facing_right else -fw
     p.blt(x-fw//2,y-fh//2,sheet,u,0,w,fh,colorkey)
 
+def draw_shop(p,shop,ox,oy):
+    """Draw the shop van at its current rotation frame, centered on its world
+    position. Falls back to a plain circle if the sheet ever fails to load."""
+    x,y=shop.pos.x-ox,shop.pos.y-oy
+    sheet,colorkey=get_shop_van_sheet()
+    if sheet is None:
+        p.circ(x,y,10,MERCHANT); return
+    size=SHOP_VAN_FRAME_SIZE
+    col,row=shop.frame%SHOP_VAN_COLUMNS,shop.frame//SHOP_VAN_COLUMNS
+    p.blt(x-size//2,y-size//2,sheet,col*size,row*size,size,size,colorkey)
+
 def draw_tilemap(p,tiled_map,ox,oy):
     """Blit every tile of the world map visible at camera offset (ox,oy)."""
     tw,th=tiled_map.tile_width,tiled_map.tile_height
@@ -73,12 +84,13 @@ def draw_tilemap(p,tiled_map,ox,oy):
                 image,u,v,colorkey=source
                 p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,colorkey)
 
-def draw_world(p,player,pools,progress,mode,camera,merchant,dev=False,
+def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
                demo_mode=False):
     p.cls(BG); ox,oy=camera.x,camera.y
     draw_tilemap(p,get_world_map(),ox,oy)
-    draw_sprite(p,"merchant",merchant.x-ox,merchant.y-oy)
-    p.text(merchant.x-ox-14,merchant.y-oy-12,"SHOP",TEXT)
+    draw_shop(p,shop,ox,oy)
+    if shop.state=="parked":
+        p.text(shop.pos.x-ox-14,shop.pos.y-oy-58,"SHOP",TEXT)
     draw_player(p,player,ox,oy)
     for orb_index in range(progress.orb_count):
         angle = player.orb_angle + (2 * math.pi * orb_index / progress.orb_count)

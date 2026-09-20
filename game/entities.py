@@ -63,3 +63,29 @@ class Pickup(Entity):
     ttl: float = PICKUP_LIFETIME
     amount: int = 1
     kind: str = "xp"
+
+@dataclass
+class Shop:
+    """The mobile shop van: drives to a random empty spot, running over
+    anything in its path, parks there to do business for a while, then picks
+    a new destination. A singleton, not pool-managed, so it doesn't share
+    Entity's active/ttl/vx/vy pooling fields. See game.systems.shop."""
+    pos: Vec2 = None
+    dest: Vec2 = None
+    state: str = "parked"            # "parked" or "driving"
+    park_timer: float = 0.0          # counts down while parked; drives again at 0
+    orientation: str = "horizontal"  # "horizontal" or "vertical" -- current hitbox shape
+    frame: int = 0                   # rotation frame index into the van spritesheet (0-47)
+    heading: tuple = (1, 0)          # last tile-step direction driven; steering keeps this
+                                      # over an equally-short alternative, to minimize turns
+    pivot_timer: float = 0.0         # counts down during a turn's frame-sweep animation
+    pivot_from_frame: int = 0        # frame the current turn's sweep started at
+    pivot_span: int = 0              # signed frame delta the current sweep covers
+    pivot_duration: float = 0.0      # total duration of the current sweep (scales with its size)
+    stuck_timer: float = 0.0         # seconds of zero progress while driving; triggers backing up
+    backup_timer: float = 0.0        # counts down while reversing away from an obstruction
+    trouble_time: float = 0.0        # cumulative seconds spent backing up on the current trip;
+                                      # past SHOP_GIVE_UP_THRESHOLD the van picks a new destination
+    def __post_init__(self):
+        if self.pos is None: self.pos = Vec2()
+        if self.dest is None: self.dest = Vec2()

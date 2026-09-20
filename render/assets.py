@@ -197,3 +197,14 @@ def get_zombie_sheet(enemy_type):
         return None
     image, colorkey = _load_image(meta["path"])
     return image, colorkey, meta
+
+# The shop van: a 7x7 grid of 100x100 frames, 48 of them used (the last cell
+# is blank) sweeping one full rotation. See game.systems.shop for how the
+# frame index is picked from the van's travel direction.
+SHOP_VAN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "White_MINIVAN_CLEAN_All_000-sheet.png")
+SHOP_VAN_FRAME_SIZE = 100
+SHOP_VAN_COLUMNS = 7
+
+def get_shop_van_sheet():
+    """Load and cache the shop van spritesheet, parsing it only once. Returns (image, colorkey)."""
+    return _load_image(SHOP_VAN_SHEET_PATH)
