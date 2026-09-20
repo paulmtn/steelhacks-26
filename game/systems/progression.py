@@ -1,3 +1,4 @@
+import math
 import random
 from game.data import ABILITIES, SHOP_ITEMS
 from game.config import (
@@ -65,15 +66,38 @@ def collect_pickups(player, pickups, progress, dt=1/60):
     return False
 
 def buy(progress, name):
-    costs={'heal':SHOP_ITEMS[0].cost,'damage':SHOP_ITEMS[1].cost,'speed':SHOP_ITEMS[2].cost}
-    cost=costs.get(name,999)
-    if progress.coins<cost:return False
-    progress.coins-=cost
-    if name=='heal': progress.health=min(progress.max_health,progress.health+30)
-    elif name=='damage': progress.damage+=1
-    elif name=='speed': progress.speed_bonus+=8
-    elif name=='magnet': progress.magnet+=20
-    else: progress.shots+=1
+    name = {
+        "heal": "Medkit",
+        "damage": "Arsenal",
+        "speed": "Boots",
+    }.get(name, name)
+    item = next((item for item in SHOP_ITEMS if item.name == name), None)
+    if item is None or name not in progress.shop_inventory:
+        return False
+    if item.stock is not None and progress.shop_items.get(name, 0) <= 0:
+        return False
+    purchase_count = progress.shop_purchases.get(name, 0)
+    cost = math.ceil(item.cost * (1.1 ** purchase_count))
+    wallet = progress.gems if item.currency == "gems" else progress.coins
+    if wallet < cost:
+        return False
+    if item.currency == "gems":
+        progress.gems -= cost
+    else:
+        progress.coins -= cost
+    progress.shop_purchases[name] = purchase_count + 1
+    if item.stock is not None:
+        progress.shop_items[name] -= 1
+    if name == "Medkit":
+        progress.health = min(progress.max_health, progress.health + 35)
+    elif name == "Arsenal":
+        progress.damage += 1
+    elif name == "Boots":
+        progress.move_multiplier *= 1.03
+    elif name == "Extra Life":
+        progress.extra_lives += 1
+    elif name == "Double XP":
+        progress.xp_multiplier *= 2
     return True
 
 def apply_ability(progress, ability_name):
@@ -81,7 +105,6 @@ def apply_ability(progress, ability_name):
                  setattr(progress, "damage", progress.damage + 1),
                  setattr(progress, "fire_rate", progress.fire_rate * .88),
              ),
-             "Magnetism":lambda: setattr(progress,"magnet",progress.magnet+32),
              "Twin Shot":lambda: setattr(progress,"shots",progress.shots+1),
              "Thick Skin":lambda: (setattr(progress,"max_health",progress.max_health+20),
                                    setattr(progress,"health",progress.health+20)),

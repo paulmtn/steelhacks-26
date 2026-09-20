@@ -17,8 +17,8 @@ pytest -q
 
 * **WASD / arrows** - move
 * **E near the SHOP marker** - open/close merchant
-* **1-5 in merchant** - heal, damage, speed, pickup magnet, multishot
-* **1-3 on level up** - choose damage, speed, or magnet ability
+* **1-4 in merchant** - buy one of the four randomly selected shop items
+* **1-3 on level up** - choose from the available abilities
 * **R** - restart after death
 * **F2** - toggle 3x demo rewards; **F3** - developer overlay
 * **F4** - grant 50 XP and 100 gold
@@ -30,11 +30,18 @@ outside the merchant. Merchant access is strictly proximity-only: stand near
 the SHOP marker and press E. Gold and XP gems are separate magnetized pickups.
 Press F2 to enable demo mode; zombie drops then provide 3x XP, gems, and gold.
 
-Zombies drop gems that are automatically collected within the magnet radius.
+The merchant randomly offers four items per run. Ten-stock coin items (Medkit,
+Arsenal, and Boots) each
+purchase increases that item's coin price by 10%. Boots increase movement speed
+by 3%. Extra Life and Double XP cost gems and are each available once per run.
+Extra Life adds a revive heart shown in the upper-left HUD, while
+Double XP doubles XP gained for the run.
+
+Zombies drop gems that are automatically collected within the pickup radius.
 Each zombie has a 10% chance to drop an XP gem; gems grant XP and each level
 pauses gameplay briefly for an ability choice. The ability pool includes
-Sharpshooter (+1 damage and faster fire rate), Magnetism, Twin Shot, Thick
-Skin (+20 max HP), Hedge of Protection, Fire from Heaven, Morning Star,
+Sharpshooter (+1 damage and faster fire rate), Twin Shot, Thick Skin (+20 max
+HP), Hedge of Protection, Fire from Heaven, Morning Star,
 Storehouse of Hail, and Job's Orb. Hedge of Protection blocks one hit and
 regenerates after 10 seconds. Fire from Heaven periodically strikes a random
 zombie with lightning that chains through nearby zombies; each Fire from Heaven
