@@ -14,6 +14,10 @@ class Pool:
     def active(self): return (x for x in self.items if x.active)
 
 class EntityPools:
-    def __init__(self, zombies, bullets, particles, pickups=80):
+    def __init__(self, zombies, bullets, particles, pickups=80, enemy_bullets=64):
         self.zombies = Pool(Zombie, zombies); self.bullets = Pool(Bullet, bullets)
         self.particles = Pool(Particle, particles); self.pickups = Pool(Pickup, pickups)
+        # Zombie-fired bullets (see game.systems.combat.fire_zombie_bullets)
+        # get their own pool, kept separate from the player's own so the two
+        # never get mixed up over who they're allowed to hit.
+        self.enemy_bullets = Pool(Bullet, enemy_bullets)

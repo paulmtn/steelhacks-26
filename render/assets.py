@@ -13,15 +13,19 @@ try:
 except ImportError:
     PILImage = None
 from game.tilemap import get_world_map, GID_FLIP_MASK
-from game.config import ZOMBIE_ANIM_FPS, WALKER_ANIM_FPS_BOOST, ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION
+from game.config import (
+    ZOMBIE_ANIM_FPS, WALKER_ANIM_FPS_BOOST, ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION,
+    PLAYER_DEATH_DURATION,
+)
+from game.data import ZOMBIE_BASE_TYPE
 
 SPRITES={"player":(0,0,0,8,8,0),"walker":(0,8,0,8,8,0),
          "runner":(0,16,0,8,8,0),"xp":(0,24,0,3,3,0),
          "gold":(0,29,0,3,3,0),"merchant":(0,34,0,8,8,0)}
-# Fallback color if a zombie's sheet ever fails to load; matches its sprite's tint.
-FALLBACK_COLORS={"player":11,"walker":14,"runner":8,"xp":13,"gold":10,"merchant":12}
-ASSETS_LOADED=False
 BG=1; TEXT=7; PLAYER=11; ZOMBIE=3; BULLET=10; COIN=9; HEALTH=11; PANEL=0; MERCHANT=12
+# Fallback color if a zombie's sheet ever fails to load; matches its sprite's tint.
+FALLBACK_COLORS={"player":11,"walker":14,"runner":8,"walker_super":14,"runner_super":8,"xp":HEALTH,"gold":10,"merchant":12}
+ASSETS_LOADED=False
 def load_assets(pyxel, path=None):
     global ASSETS_LOADED
     if path:
@@ -31,6 +35,79 @@ def load_assets(pyxel, path=None):
         except (OSError, ValueError):
             ASSETS_LOADED=False
     return SPRITES
+
+# One fixed pyxel.sounds[] slot and channel per sound effect. Only 4 mixer
+# channels exist, and channel 3 is reserved entirely for the looping bgm (see
+# MUSIC_CHANNEL below) -- playing an effect on the same channel as the bgm
+# would cut the music off (silently, forever, since nothing re-triggers a
+# loop after it's been interrupted), so every sound effect lives on channel
+# 0-2 instead, grouped by what they mean rather than by literal sound:
+# channel 1 is every player attack (gunshot plus the three ability impacts),
+# channel 2 is enemy feedback and progression (hurt/dead naturally cut each
+# other off -- a kill just replaces the hurt flash with the death sound, same
+# as most games -- and a pickup/purchase chime is rare enough to tolerate
+# occasionally losing to one of those). Channel 0 is hit_hurt shared with
+# step and power_up -- footsteps retrigger every walking frame and will cut
+# those off almost immediately, but that's a one-frame cosmetic loss against
+# rare events.
+_SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "sounds")
+SOUND_SLOTS = {
+    "hit_hurt": (0, 0, "hitHurt.wav"),
+    "mace": (1, 1, "mace.wav"),
+    "orb": (1, 2, "orb.wav"),
+    "thunder": (1, 3, "thunder.wav"),
+    "shoot": (1, 6, "shoot.wav"),
+    "enemy_hurt": (2, 7, "HurtEnemy.wav"),
+    "enemy_dead": (2, 8, "enemyDead.wav"),
+    "pickup_coin": (2, 4, "pickupCoin.wav"),
+    "power_up": (0, 5, "power_up.wav"),
+    "step": (0, 9, "step.wav"),
+}
+SOUNDS_LOADED=False
+
+# The game's soundtrack: channel 3, kept free of every one-shot sound effect
+# above (see the grouping comment) so nothing ever interrupts it, looping for
+# as long as the game runs.
+MUSIC_CHANNEL = 3
+MUSIC_SLOT = 10
+MUSIC_PATH = os.path.join(_SOUNDS_DIR, "Battle Encounter.ogg")
+MUSIC_LOADED = False
+
+def load_sounds(pyxel):
+    """Load each sound effect's WAV, and the bgm's OGG, into their own
+    pyxel.sounds[] slot in PCM mode, once, ready for play_sound/play_music to
+    trigger by channel."""
+    global SOUNDS_LOADED
+    if SOUNDS_LOADED:
+        return
+    for _channel, slot, filename in SOUND_SLOTS.values():
+        try:
+            pyxel.sounds[slot].pcm(os.path.join(_SOUNDS_DIR, filename))
+        except (OSError, ValueError):
+            pass
+    try:
+        pyxel.sounds[MUSIC_SLOT].pcm(MUSIC_PATH)
+    except (OSError, ValueError):
+        pass
+    SOUNDS_LOADED=True
+
+def play_music(pyxel):
+    """Start the soundtrack looping on its dedicated channel. Idempotent --
+    safe to call once at startup; pyxel keeps replaying it on its own after
+    that (loop=True), so nothing needs to poll or re-trigger it per frame."""
+    global MUSIC_LOADED
+    if MUSIC_LOADED:
+        return
+    pyxel.play(MUSIC_CHANNEL, MUSIC_SLOT, loop=True)
+    MUSIC_LOADED = True
+
+def play_sound(pyxel, name):
+    """Play the named effect (a key of SOUND_SLOTS) on its assigned channel,
+    cutting off whatever that channel was already playing -- fine for these
+    short one-shot effects, which never share a channel with the looping bgm
+    (see MUSIC_CHANNEL)."""
+    channel, slot, _filename = SOUND_SLOTS[name]
+    pyxel.play(channel, slot)
 
 
 def slice_image(image, tile_width, tile_height, start_index, end_index):
@@ -155,6 +232,7 @@ PLAYER_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_wh
 WALK_GUN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Walk_Gun.png")
 SHOOTING_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Shooting.png")
 IDLE_GUN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "Idle_Gun.png")
+DEATH_GUN_SHEET_PATH = os.path.join(os.path.dirname(__file__), "graphics", "death_Gun.png")
 
 def get_player_sheet():
     """Load and cache the walking-while-firing spritesheet. Returns (image, colorkey)."""
@@ -171,6 +249,16 @@ def get_shooting_sheet():
 def get_idle_gun_sheet():
     """Load and cache the standing-still-not-firing spritesheet. Returns (image, colorkey)."""
     return _load_image(IDLE_GUN_SHEET_PATH)
+
+# Same 48x64 frame layout and 6-row (no dedicated E/W pose) facing scheme as
+# Idle_Gun/Walk_Gun -- see PLAYER_6ROW_FACING_MAP -- but 8 columns: one play-
+# once death animation per facing direction instead of a walk cycle.
+PLAYER_DEATH_FRAMES = 8
+PLAYER_DEATH_FPS = PLAYER_DEATH_FRAMES / PLAYER_DEATH_DURATION
+
+def get_player_death_sheet():
+    """Load and cache the player's death spritesheet. Returns (image, colorkey)."""
+    return _load_image(DEATH_GUN_SHEET_PATH)
 
 # The game's only two zombie classes, each with three single-row spritesheets
 # -- walking (8 frames, looping), taking a hit and surviving (4 frames,
@@ -224,11 +312,19 @@ ZOMBIE_SHEETS = {
     },
 }
 
+# "_super" zombies (see game.data.ENEMY_TYPES/ZOMBIE_MERGE_TARGET) don't get
+# their own art -- there isn't any -- they reuse their base type's sheets (see
+# game.data.ZOMBIE_BASE_TYPE) at ZOMBIE_SUPER_SCALE, drawn bigger by
+# render.draw.draw_zombie to match their doubled hitbox radius.
+ZOMBIE_SUPER_SCALE = 2.0
+
 def get_zombie_sheet(enemy_type, variant="walk"):
     """Load and cache enemy_type's spritesheet for variant ("walk", "hurt",
     or "death"), parsing it only once. Returns (image, colorkey, meta) or
-    None if enemy_type/variant has no sheet."""
-    type_sheets = ZOMBIE_SHEETS.get(enemy_type)
+    None if enemy_type/variant has no sheet. A "_super" enemy_type resolves
+    to its base type's sheet (see ZOMBIE_BASE_TYPE) -- there's no separate
+    art for it, just a bigger draw scale."""
+    type_sheets = ZOMBIE_SHEETS.get(ZOMBIE_BASE_TYPE.get(enemy_type, enemy_type))
     if type_sheets is None:
         return None
     meta = type_sheets.get(variant)

@@ -1,12 +1,14 @@
 from game.pools import Pool
 from game.entities import Zombie, Bullet
-from game.data import ABILITIES, SHOP_ITEMS, Vec2
+from game.data import ABILITIES, SHOP_ITEMS, Vec2, ENEMY_TYPES, ZOMBIE_MERGE_TARGET
+from game.systems.spawn import spawn_zombie, spawn_super_zombie, merge_touching_zombies
 from game.spatial_hash import SpatialHash
-from game.state import StateMachine, GameMode, PlayerProgress
+from game.state import StateMachine, GameMode, PlayerProgress, combined_score
+from game.save import load_save, save_high_score
 from game.entities import Player, Pickup
-from game.systems.progression import buy, collect_pickups, cleanup_dead, tick_zombie_hit_effects
+from game.systems.progression import buy, buy_permanent, collect_pickups, cleanup_dead, tick_zombie_hit_effects
 from game.pools import EntityPools
-from game.systems.combat import nearest_target, update_bullets
+from game.systems.combat import nearest_target, update_bullets, damage_at_point, fire_zombie_bullets, update_enemy_bullets
 from game.systems.movement import move_player, move_zombies
 from game.tilemap import get_world_map, TiledMap, compute_distance_field
 from game.systems.combat import fire_beam
@@ -24,6 +26,8 @@ from game.config import (
     SHOP_PARK_DURATION, SHOP_HITBOX_LONG, SHOP_HITBOX_SHORT, SHOP_PIVOT_DURATION,
     SHOP_STUCK_THRESHOLD, SHOP_GIVE_UP_THRESHOLD,
     ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION,
+    ZOMBIE_BULLET_RANGE, ZOMBIE_FIRE_RATE, ZOMBIE_BULLET_SPEED,
+    MAX_ZOMBIES, WORLD_WIDTH, WORLD_HEIGHT,
 )
 
 def test_pool_is_fixed_and_reuses():
@@ -38,14 +42,29 @@ def test_state_and_merchant():
     assert buy(p,'damage'); assert p.damage==2 and p.coins==0
 
 def test_pickups_are_magnetized_toward_player():
-    player = Player(active=True, pos=Vec2(0, 0), magnet=50)
+    player = Player(active=True, pos=Vec2(0, 0))
     pickup = Pickup(active=True, pos=Vec2(10, 0), kind="gold", amount=1)
-    progress = PlayerProgress()
+    progress = PlayerProgress(magnet=50)
 
     collect_pickups(player, (pickup,), progress, dt=0.1)
 
     assert pickup.pos.x < 10
     assert pickup.pos.x > 0
+
+def test_magnet_upgrade_actually_widens_pickup_range():
+    player = Player(active=True, pos=Vec2(0, 0))
+    pickup = Pickup(active=True, pos=Vec2(60, 0), kind="gold", amount=1)
+    progress = PlayerProgress(coins=20)
+
+    # Out of range before the upgrade -- buy_permanent's "Magnet" branch
+    # raises progress.magnet, which collect_pickups must actually read for
+    # this purchase to do anything.
+    collect_pickups(player, (pickup,), progress, dt=0.1)
+    assert pickup.pos.x == 60
+
+    assert buy_permanent(progress, "Magnet")
+    collect_pickups(player, (pickup,), progress, dt=0.1)
+    assert pickup.pos.x < 60
 
 def test_shop_stock_prices_and_gem_items():
     progress = PlayerProgress(
@@ -390,9 +409,9 @@ def test_tick_zombie_hit_effects_decays_hurt_timer_without_releasing():
     assert zombie.active  # surviving a hit never releases the zombie
 
 def test_uncollected_pickups_expire_and_free_pool_slots():
-    player = Player(active=True, pos=Vec2(0, 0), magnet=0)
+    player = Player(active=True, pos=Vec2(0, 0))
     pickup = Pickup(active=True, pos=Vec2(100, 0), kind="gold", amount=1, ttl=0.1)
-    progress = PlayerProgress()
+    progress = PlayerProgress(magnet=0)
 
     collect_pickups(player, (pickup,), progress, dt=0.1)
 
@@ -557,27 +576,30 @@ def test_shop_destination_always_has_room_for_the_vans_full_hitbox():
     the van's actual (up to 5-tile) footprint -- picking a destination on
     that check alone could land it in a pocket it could never actually fit
     into. Build a map with exactly one such trap (a 3x3 clearing boxed in by
-    walls) plus one genuinely spacious area, and confirm _pick_destination
-    always lands in the spacious one, never the trap."""
-    width = height = 20
+    walls) plus one genuinely spacious area -- both at or past
+    SHOP_MIN_DEST_COL, since the van is confined to that column and further
+    right -- and confirm _pick_destination always lands in the spacious one,
+    never the trap, and never left of that confinement column."""
+    width, height = 70, 20
     tile_size = 16
     data = [1] * (width * height)  # solid everywhere by default
     def clear(c0, c1, r0, r1):
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
                 data[r * width + c] = 0
-    clear(4, 6, 4, 6)      # a 3x3 trap room -- enough for the old check, not the van
-    clear(10, 18, 10, 18)  # a genuinely spacious area
+    clear(44, 46, 4, 6)    # a 3x3 trap room -- enough for the old check, not the van
+    clear(50, 58, 10, 18)  # a genuinely spacious area
     tm = TiledMap(width=width, height=height, tile_width=tile_size, tile_height=tile_size,
                   layers={"Collisions": data}, tilesets=[])
     tilemap_module._solid_tiles_cache.clear()
 
-    current = Vec2(5 * tile_size + 8, 5 * tile_size + 8)  # inside the trap room
+    current = Vec2(45 * tile_size + 8, 5 * tile_size + 8)  # inside the trap room
     for _ in range(100):
         dest = shop_module._pick_destination(tm, current)
         assert shop_module._has_room_for_hitbox(tm, dest.x, dest.y)
         col, row = int(dest.x // tile_size), int(dest.y // tile_size)
-        assert not (4 <= col <= 6 and 4 <= row <= 6)  # never the trap room
+        assert not (44 <= col <= 46 and 4 <= row <= 6)  # never the trap room
+        assert col >= shop_module.SHOP_MIN_DEST_COL  # never left of the confinement column
 
 def test_shop_kills_any_zombie_it_drives_over():
     shop = Shop(pos=Vec2(500, 500), dest=Vec2(500, 500), state="driving", orientation="horizontal")
@@ -803,7 +825,12 @@ def test_van_backs_up_instead_of_freezing_at_a_too_narrow_gap(monkeypatch):
 def test_van_backup_never_triggers_during_unobstructed_driving():
     """Zero false positives: a normal trip with nothing in the way must never
     make the van think it's stuck and start backing up."""
-    shop = Shop(pos=Vec2(400, 600), dest=Vec2(700, 300), state="driving")
+    # (768,88) -> (900,88) is a straight run through open ground -- unlike
+    # (400,600), which turned out to already be inside solid map geometry
+    # (a wall block spanning roughly tile columns 20-30, rows 34-41), so the
+    # van could never move in any direction and failed this test for reasons
+    # having nothing to do with "unobstructed".
+    shop = Shop(pos=Vec2(768, 88), dest=Vec2(900, 88), state="driving")
     player = Player(active=True, pos=Vec2(-9999, -9999))
     for _ in range(600):
         update_shop(shop, 1 / 60, [], player)
@@ -867,3 +894,415 @@ def test_zombie_sheets_have_matching_hurt_and_death_variants_for_both_types():
             assert meta["frames"] == 4
             assert meta["frame_width"] == meta["frame_height"] == 100
             assert os.path.isfile(meta["path"])
+
+def test_super_zombie_stats_and_scale_are_the_right_multiples_of_the_base_types():
+    for base_type, super_type in ZOMBIE_MERGE_TARGET.items():
+        base, super_ = ENEMY_TYPES[base_type], ENEMY_TYPES[super_type]
+        assert super_.hp == base.hp * 3
+        assert super_.speed == base.speed * 2
+        assert super_.contact_damage == base.contact_damage * 2  # melee only -- see ZOMBIE_BASE_TYPE for bullet damage
+        assert super_.radius == base.radius * 2
+
+def test_spawn_zombie_never_creates_a_super_variant_directly():
+    pool = Pool(Zombie, 50)
+    for _ in range(50):
+        z = spawn_zombie(pool, wave=1)
+        assert z.enemy_type in ("walker", "runner")
+        assert z.radius == ENEMY_TYPES[z.enemy_type].radius
+
+def _zombie_grid(zombies):
+    """A SpatialHash populated with zombies, matching what main.py builds
+    each frame -- merge_touching_zombies uses it to only check nearby
+    zombies as merge candidates instead of the whole population (see its
+    own docstring for why that matters)."""
+    grid = SpatialHash(32)
+    for z in zombies:
+        grid.insert(z)
+    return grid
+
+def test_three_mutually_touching_walkers_merge_into_a_super_walker():
+    """A fully-connected trio (each pair touching, not just a chain) of the
+    same base type fuses into one bigger "_super" zombie centered on them,
+    and the three originals are gone -- not just marked dying."""
+    pool = Pool(Zombie, 10)
+    a = pool.acquire(); a.pos.x, a.pos.y, a.enemy_type, a.radius = 500, 500, "walker", 5
+    b = pool.acquire(); b.pos.x, b.pos.y, b.enemy_type, b.radius = 506, 500, "walker", 5
+    c = pool.acquire(); c.pos.x, c.pos.y, c.enemy_type, c.radius = 503, 505, "walker", 5
+    zombies = [a, b, c]
+
+    merge_touching_zombies(zombies, pool, _zombie_grid(zombies))
+
+    # The pool reuses freed slots, so the merged zombie may well *be* one of
+    # a/b/c's underlying objects now repurposed -- what matters is that only
+    # one zombie survives in the pool at all, as the merged super type.
+    survivors = list(pool.active())
+    assert len(survivors) == 1
+    merged = survivors[0]
+    assert merged.enemy_type == "walker_super"
+    assert merged.hp == ENEMY_TYPES["walker_super"].hp
+    assert merged.radius == ENEMY_TYPES["walker_super"].radius
+    assert merged.pos.x == (500 + 506 + 503) / 3
+    assert merged.pos.y == (500 + 500 + 505) / 3
+
+def test_a_touching_chain_that_isnt_a_mutual_trio_does_not_merge():
+    """Three zombies in a line -- A touches B, B touches C, but A and C are
+    too far apart to touch each other -- is a chain, not a fully-connected
+    trio, and must not merge."""
+    pool = Pool(Zombie, 10)
+    a = pool.acquire(); a.pos.x, a.pos.y, a.enemy_type, a.radius = 500, 500, "walker", 5
+    b = pool.acquire(); b.pos.x, b.pos.y, b.enemy_type, b.radius = 510, 500, "walker", 5
+    c = pool.acquire(); c.pos.x, c.pos.y, c.enemy_type, c.radius = 520, 500, "walker", 5
+    zombies = [a, b, c]
+
+    merge_touching_zombies(zombies, pool, _zombie_grid(zombies))
+
+    assert a.active and b.active and c.active
+    assert {z.enemy_type for z in pool.active()} == {"walker"}
+
+def test_two_touching_zombies_do_not_merge():
+    """Merging needs three, not two -- a pair just touching stays as-is."""
+    pool = Pool(Zombie, 10)
+    a = pool.acquire(); a.pos.x, a.pos.y, a.enemy_type, a.radius = 500, 500, "walker", 5
+    b = pool.acquire(); b.pos.x, b.pos.y, b.enemy_type, b.radius = 506, 500, "walker", 5
+    zombies = [a, b]
+
+    merge_touching_zombies(zombies, pool, _zombie_grid(zombies))
+
+    assert a.active and b.active
+
+def test_merging_requires_the_same_base_type():
+    """Two walkers and a runner all mutually touching isn't a same-type
+    trio, so nothing merges even though every pair is in contact."""
+    pool = Pool(Zombie, 10)
+    a = pool.acquire(); a.pos.x, a.pos.y, a.enemy_type, a.radius = 500, 500, "walker", 5
+    b = pool.acquire(); b.pos.x, b.pos.y, b.enemy_type, b.radius = 506, 500, "walker", 5
+    c = pool.acquire(); c.pos.x, c.pos.y, c.enemy_type, c.radius = 503, 505, "runner", 5
+    zombies = [a, b, c]
+
+    merge_touching_zombies(zombies, pool, _zombie_grid(zombies))
+
+    assert a.active and b.active and c.active
+
+def test_super_zombies_do_not_merge_further():
+    """The two new types don't chain-evolve into something bigger still --
+    three mutually touching "_super" zombies just stay as they are."""
+    pool = Pool(Zombie, 10)
+    zombies = [spawn_super_zombie(pool, "walker_super", 500 + i * 6, 500) for i in range(3)]
+
+    merge_touching_zombies(zombies, pool, _zombie_grid(zombies))
+
+    assert all(z.active for z in zombies)
+    assert {z.enemy_type for z in pool.active()} == {"walker_super"}
+
+def test_merge_touching_zombies_stays_cheap_with_a_full_scattered_population():
+    """Regression guard: an earlier version of this checked every same-type
+    pair (and often triple) brute-force, which cost several ms/frame with a
+    full zombie population -- enough to visibly stutter the game (dropped
+    frames make effects with a fixed cast-time position, like the lightning
+    chain or orb strikes, look like they're lagging behind the player). This
+    uses the spatial hash to only check zombies actually near each other, so
+    a full, mostly-scattered population (matching how zombies really spawn,
+    at map edges, and converge over time) should take a fraction of a
+    millisecond, not multiple milliseconds."""
+    import random, time
+    rng = random.Random(0)
+    pool = Pool(Zombie, MAX_ZOMBIES)
+    zombies = []
+    for i in range(MAX_ZOMBIES):
+        z = pool.acquire()
+        z.enemy_type = "walker" if rng.random() < .75 else "runner"
+        z.radius = 5
+        if i < 30:  # a real cluster right on the player
+            z.pos.x = 500 + rng.uniform(-40, 40)
+            z.pos.y = 500 + rng.uniform(-40, 40)
+        else:  # the rest, scattered across the whole world, still converging
+            z.pos.x = rng.uniform(0, WORLD_WIDTH)
+            z.pos.y = rng.uniform(0, WORLD_HEIGHT)
+        zombies.append(z)
+    grid = _zombie_grid(zombies)
+
+    start = time.perf_counter()
+    for _ in range(10):
+        merge_touching_zombies(zombies, pool, grid)
+    elapsed_per_call = (time.perf_counter() - start) / 10
+
+    assert elapsed_per_call < 0.005  # generously under a 60fps frame budget (16.7ms)
+
+def test_max_zombie_radius_matches_the_biggest_enemy_type():
+    from game.data import MAX_ZOMBIE_RADIUS
+    assert MAX_ZOMBIE_RADIUS == 10
+    assert MAX_ZOMBIE_RADIUS == max(t.radius for t in ENEMY_TYPES.values())
+
+def test_hail_burst_reaches_a_super_zombie_sitting_at_its_outer_edge():
+    """damage_at_point's broad-phase spatial-hash query has to reach past
+    the blast radius by the target's own radius, or a zombie sitting well
+    within the true hit range (blast radius + its radius) but outside the
+    query's raw radius can be excluded before the precise per-zombie check
+    even runs. A fine-grained hash (cell_size=5, versus the game's actual
+    32) makes that cell-boundary gap deterministic to test: with the old,
+    un-padded query (radius=5) the "_super" zombie's cell falls outside the
+    scanned range even though it's well within the true 5+10=15 hit range;
+    padding the query by MAX_ZOMBIE_RADIUS fixes that."""
+    pool = Pool(Zombie, 1)
+    super_zombie = spawn_super_zombie(pool, "walker_super", 12, 0)
+    grid = SpatialHash(5)
+    grid.insert(super_zombie)
+
+    hit = damage_at_point([super_zombie], grid, 0, 0, 5, damage=1)
+
+    assert hit
+    assert super_zombie.hp == ENEMY_TYPES["walker_super"].hp - 1
+
+def test_bullets_reach_a_super_zombies_outer_rim():
+    """update_bullets' broad-phase query has the same class of gap as
+    damage_at_point's (see test_hail_burst_reaches_a_super_zombie_sitting_at_its_outer_edge)
+    -- it has to reach past the bullet's own radius by the target's radius
+    too, or a bullet well within true hit range of a "_super" zombie's rim
+    can still miss it because the query itself never returns it as a
+    candidate."""
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 0, 0
+    bullet.vx, bullet.vy = 0, 0  # stationary: isolates the query/hit check from travel
+    bullet.ttl, bullet.radius, bullet.damage = 1.5, 2, 5
+
+    zpool = Pool(Zombie, 1)
+    super_zombie = spawn_super_zombie(zpool, "walker_super", 10.5, 0)
+    grid = SpatialHash(5)
+    grid.insert(super_zombie)
+
+    hits = update_bullets(pool, [super_zombie], 1 / 60, 2000, 2000, grid)
+
+    assert hits == [super_zombie]
+    assert not bullet.active
+    assert super_zombie.hp == ENEMY_TYPES["walker_super"].hp - 5
+
+def test_super_zombie_stops_pursuing_within_6_tiles(monkeypatch):
+    """"_super" zombies hold position once close enough to shoot instead of
+    closing the last few tiles into melee (see RANGED_ZOMBIE_STOP_TILES /
+    fire_zombie_bullets)."""
+    tm = _open_map()
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, obstacle=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    zombie = spawn_super_zombie(pool, "walker_super", 3 * 16 + 8, 3 * 16 + 8)
+    player = Player(active=True, pos=Vec2(8 * 16 + 8, 3 * 16 + 8))  # 5 tiles away, inside the 6-tile stop range
+
+    before_x, before_y = zombie.pos.x, zombie.pos.y
+    move_zombies([zombie], player, 1 / 60, 40)
+
+    assert (zombie.pos.x, zombie.pos.y) == (before_x, before_y)
+
+def test_super_zombie_still_pursues_beyond_6_tiles(monkeypatch):
+    tm = _open_map()
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, obstacle=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    zombie = spawn_super_zombie(pool, "walker_super", 3 * 16 + 8, 3 * 16 + 8)
+    player = Player(active=True, pos=Vec2(16 * 16 + 8, 3 * 16 + 8))  # well past the 6-tile stop range
+
+    before_x = zombie.pos.x
+    move_zombies([zombie], player, 1 / 60, 40)
+
+    assert zombie.pos.x > before_x
+
+def test_base_zombies_ignore_the_stop_range_and_keep_chasing(monkeypatch):
+    """Only "_super" zombies hold at range -- base zombies are melee-only
+    and always keep closing the distance, even well inside 6 tiles."""
+    tm = _open_map()
+    tilemap_module._solid_tiles_cache.clear()
+    movement_module._flow_field_cache.update(tiled_map_id=None, target=None, obstacle=None, field=None)
+    monkeypatch.setattr(movement_module, "get_world_map", lambda: tm)
+
+    zombie = Zombie(active=True, enemy_type="walker", pos=Vec2(3 * 16 + 8, 3 * 16 + 8))
+    player = Player(active=True, pos=Vec2(8 * 16 + 8, 3 * 16 + 8))  # 5 tiles away
+
+    before_x = zombie.pos.x
+    move_zombies([zombie], player, 1 / 60, 40)
+
+    assert zombie.pos.x > before_x
+
+def test_super_zombie_fires_at_the_player_in_range_with_los(monkeypatch):
+    """"_super" zombies shoot at the player by the same rules the player's
+    own auto-fire uses (see nearest_target): in range, clear line of sight,
+    on a cooldown -- see fire_zombie_bullets."""
+    tm = TiledMap(width=10, height=10, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * 100}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    shooter = spawn_super_zombie(pool, "walker_super", 0, 0)
+    player = Player(active=True, pos=Vec2(50, 0))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [shooter], player, 1 / 60)
+
+    fired = list(bullets.active())
+    assert len(fired) == 1
+    b = fired[0]
+    # Bullet damage is the base type's own (unmultiplied) contact_damage,
+    # not the super's 2x melee contact_damage -- the melee buff doesn't
+    # carry over to the ranged attack.
+    assert b.damage == ENEMY_TYPES["walker"].contact_damage
+    assert b.vx > 0 and b.vy == 0  # aimed straight at the player, due east
+    assert round((b.vx ** 2 + b.vy ** 2) ** 0.5) == round(ZOMBIE_BULLET_SPEED)
+    assert shooter.fire_timer == ZOMBIE_FIRE_RATE
+
+def test_base_zombies_never_fire():
+    """Only "_super" zombies shoot -- base zombies stay melee-only even
+    with a clear, in-range shot at the player."""
+    pool = Pool(Zombie, 1)
+    walker = pool.acquire()
+    walker.enemy_type = "walker"
+    walker.pos.x, walker.pos.y = 0, 0
+    player = Player(active=True, pos=Vec2(50, 0))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [walker], player, 1 / 60)
+
+    assert not list(bullets.active())
+
+def test_super_zombie_respects_its_own_cooldown(monkeypatch):
+    tm = TiledMap(width=10, height=10, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * 100}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    shooter = spawn_super_zombie(pool, "walker_super", 0, 0)
+    shooter.fire_timer = 1.0
+    player = Player(active=True, pos=Vec2(50, 0))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [shooter], player, 1 / 60)
+
+    assert not list(bullets.active())
+    assert shooter.fire_timer < 1.0  # still ticks down even while on cooldown
+
+def test_super_zombie_does_not_fire_beyond_range(monkeypatch):
+    tm = TiledMap(width=400, height=400, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * (400 * 400)}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    shooter = spawn_super_zombie(pool, "walker_super", 0, 0)
+    player = Player(active=True, pos=Vec2(ZOMBIE_BULLET_RANGE + 50, 0))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [shooter], player, 1 / 60)
+
+    assert not list(bullets.active())
+
+def test_super_zombie_does_not_fire_through_a_wall(monkeypatch):
+    """Mirrors test_nearest_target_ignores_enemies_behind_walls, from the
+    zombie's side of the same has_line_of_sight check."""
+    width, height, tile_size = 10, 10, 16
+    wall_col = 3
+    data = [0] * (width * height)
+    for row in range(height):
+        data[row * width + wall_col] = 1
+    tm = TiledMap(width=width, height=height, tile_width=tile_size, tile_height=tile_size,
+                  layers={"Collisions": data}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    pool = Pool(Zombie, 1)
+    shooter = spawn_super_zombie(pool, "walker_super", 1 * tile_size + 8, 5 * tile_size + 8)
+    player = Player(active=True, pos=Vec2(5 * tile_size + 8, 5 * tile_size + 8))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [shooter], player, 1 / 60)
+
+    assert not list(bullets.active())
+
+def test_super_zombie_does_not_fire_through_the_van(monkeypatch):
+    """Mirrors test_nearest_target_ignores_enemies_behind_the_van -- the van
+    blocks a zombie's shot at the player exactly like it blocks the
+    player's own auto-aim."""
+    tm = TiledMap(width=10, height=10, tile_width=16, tile_height=16,
+                  layers={"Collisions": [0] * 100}, tilesets=[])
+    tilemap_module._solid_tiles_cache.clear()
+    monkeypatch.setattr(combat_module, "get_world_map", lambda: tm)
+
+    shop = Shop(pos=Vec2(5 * 16 + 8, 5 * 16 + 8), state="parked", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+
+    pool = Pool(Zombie, 1)
+    shooter = spawn_super_zombie(pool, "walker_super", 1 * 16 + 8, 5 * 16 + 8)
+    player = Player(active=True, pos=Vec2(9 * 16 + 8, 5 * 16 + 8))
+    bullets = Pool(Bullet, 4)
+
+    fire_zombie_bullets(bullets, [shooter], player, 1 / 60, obstacle=obstacle)
+
+    assert not list(bullets.active())
+
+def test_update_enemy_bullets_damages_the_player():
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 0, 0
+    bullet.vx, bullet.vy = 0, 0
+    bullet.ttl, bullet.radius, bullet.damage = 1.5, 2, 7
+
+    player = Player(active=True, pos=Vec2(0, 0), invulnerable=0)
+
+    damage = update_enemy_bullets(pool, player, 1 / 60, 2000, 2000)
+
+    assert damage == 7
+    assert not bullet.active
+
+def test_update_enemy_bullets_pass_through_an_invulnerable_player():
+    """Mirrors the existing shop/zombie contact rule: while invulnerable,
+    the player simply can't be hit -- an incoming bullet flies on through
+    rather than being consumed harmlessly."""
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 0, 0
+    bullet.vx, bullet.vy = 0, 0
+    bullet.ttl, bullet.radius, bullet.damage = 1.5, 2, 7
+
+    player = Player(active=True, pos=Vec2(0, 0), invulnerable=0.5)
+
+    damage = update_enemy_bullets(pool, player, 1 / 60, 2000, 2000)
+
+    assert damage == 0
+    assert bullet.active
+
+def test_update_enemy_bullets_are_destroyed_by_the_van():
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 400, 500
+    bullet.vx, bullet.vy = 200, 0
+    bullet.ttl, bullet.radius, bullet.damage = 1.5, 2, 7
+
+    player = Player(active=True, pos=Vec2(-9999, -9999))
+    shop = Shop(pos=Vec2(500, 500), state="parked", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+
+    for _ in range(120):
+        update_enemy_bullets(pool, player, 1 / 60, 2000, 2000, obstacle=obstacle)
+        if not bullet.active:
+            break
+    else:
+        raise AssertionError("enemy bullet was never stopped by the van")
+    assert bullet.pos.x < 500
+
+def test_combined_score_scales_with_wave():
+    progress = PlayerProgress(score=200, wave=3)
+    assert combined_score(progress) == 600
+
+def test_high_score_round_trips_through_save_file(tmp_path):
+    path = tmp_path / "save.json"
+    assert load_save(path).high_score == 0
+    save_high_score(4200, path)
+    assert load_save(path).high_score == 4200
+
+def test_load_save_ignores_corrupt_file(tmp_path):
+    path = tmp_path / "save.json"
+    path.write_text("not json")
+    assert load_save(path).high_score == 0

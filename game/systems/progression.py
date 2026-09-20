@@ -6,8 +6,11 @@ from game.config import (
     MAX_MORNING_STARS,
     PICKUP_CLOSE_MAGNET_RADIUS,
     PICKUP_CLOSE_MAGNET_SPEED,
+    PICKUP_COLLECT_RADIUS,
     PICKUP_LIFETIME,
     PICKUP_MAGNET_SPEED,
+    XP_TEXT_DURATION,
+    XP_TEXT_RISE_SPEED,
     ZOMBIE_DEATH_DURATION,
 )
 
@@ -25,9 +28,24 @@ def cleanup_dead(
     for z in list(zombies):
         if z.hp<=0 and not z.dying:
             z.dying=True; z.death_timer=ZOMBIE_DEATH_DURATION
-            progress.score += 10
-            # Every kill grants base XP; a gem is a separate 10% bonus drop.
-            progress.xp += reward_multiplier * progress.xp_multiplier
+            points = 10
+            progress.score += points
+            progress.score_ring_radius += points
+                        # Every kill grants base XP; a gem is a separate 10% bonus drop.
+            xp_gained = reward_multiplier * progress.xp_multiplier
+            progress.xp += xp_gained
+            xp_text=pools.particles.acquire()
+            if xp_text:
+                xp_text.pos.x,xp_text.pos.y=z.pos.x,z.pos.y-z.radius
+                xp_text.amount=xp_gained
+                xp_text.vx,xp_text.vy=0,-XP_TEXT_RISE_SPEED
+                xp_text.ttl,xp_text.kind=XP_TEXT_DURATION,"xp_text"
+                # Pool.acquire() doesn't clear a recycled Particle's old fields
+                # -- without this, a slot last used as a beam/lightning effect
+                # would leave its stale .source behind, and draw_world would
+                # then anchor this popup to that (possibly still-live) entity
+                # instead of the zombie's death position.
+                xp_text.source=xp_text.target=None
             if random.random() < gem_drop_chance:
                 xp=pools.pickups.acquire()
                 if xp:
@@ -61,13 +79,16 @@ def collect_pickups(player, pickups, progress, dt=1/60):
         # pickup inward instead of pushing it away.
         dx,dy=player.pos.x-item.pos.x,player.pos.y-item.pos.y
         distance=(dx*dx+dy*dy)**.5
-        if distance <= player.magnet:
-            if distance > 2:
+        # progress.magnet, not a Player field -- it's what buy_permanent's
+        # "Magnet" upgrade actually raises, so reading it here is what makes
+        # that upgrade do anything.
+        if distance <= progress.magnet:
+            if distance > PICKUP_COLLECT_RADIUS:
                 if distance <= PICKUP_CLOSE_MAGNET_RADIUS:
                     speed = min(PICKUP_CLOSE_MAGNET_SPEED, distance * 24)
                 else:
                     speed = min(PICKUP_MAGNET_SPEED, distance * 12)
-                step = min(speed * dt, distance - 2)
+                step = min(speed * dt, distance - PICKUP_COLLECT_RADIUS)
                 item.pos.x += dx/distance*step
                 item.pos.y += dy/distance*step
             else:

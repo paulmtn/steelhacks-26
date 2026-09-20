@@ -26,15 +26,64 @@ class EnemyType:
     hp: float
     contact_damage: float
     color: int
+    radius: float = 5
 
-# Only two zombie classes, each with its own walk-cycle sprite (see
+# Only two base zombie classes, each with its own walk-cycle sprite (see
 # render.assets.ZOMBIE_SHEETS) -- the old plain-circle "walker"/"runner"
 # have been removed. Stats stay relative to that original walker baseline
 # (speed 18, hp 2): runner is 2x speed / 1/2 hp, walker is 1/2 speed / 2x hp.
+#
+# "_super" variants aren't spawned directly (see game.systems.spawn.spawn_zombie)
+# -- they're what three of the same base type become when they're ever all
+# mutually touching at once (see ZOMBIE_MERGE_TARGET and
+# game.systems.spawn.merge_touching_zombies): 3x health, 2x speed, 2x melee
+# (contact_damage) damage, and a doubled hitbox/sprite scale, relative to
+# their base type. Their ranged attack (see
+# game.systems.combat.fire_zombie_bullets) deals the *base* type's own
+# (unmultiplied) contact_damage instead -- the melee buff doesn't carry over
+# to their bullets. They reuse their base type's art at 2x scale rather than
+# needing new sheets (see ZOMBIE_BASE_TYPE / render.assets.ZOMBIE_SUPER_SCALE).
 ENEMY_TYPES = {
     "walker": EnemyType("walker", 9, 4, 10, 14),   # slow, tanky -- Blood Monster_A_Walk
     "runner": EnemyType("runner", 36, 1, 10, 8),   # fast, fragile -- Demon_A_Walk
+    "walker_super": EnemyType("walker_super", 9 * 2, 4 * 3, 10 * 2, 14, radius=10),
+    "runner_super": EnemyType("runner_super", 36 * 2, 1 * 3, 10 * 2, 8, radius=10),
 }
+
+# Base zombie type -> the bigger type it merges into (see ENEMY_TYPES above
+# and game.systems.spawn.merge_touching_zombies). Only base types are keys
+# here -- a super zombie doesn't merge further.
+ZOMBIE_MERGE_TARGET = {"walker": "walker_super", "runner": "runner_super"}
+
+# The reverse of ZOMBIE_MERGE_TARGET -- a "_super" type's own base type.
+# Used wherever a super needs to fall back to its base type's own stats or
+# art instead of its own (e.g. bullet damage in fire_zombie_bullets, or the
+# sprite sheet in render.assets.get_zombie_sheet).
+ZOMBIE_BASE_TYPE = {super_type: base_type for base_type, super_type in ZOMBIE_MERGE_TARGET.items()}
+
+# Only "_super" zombies fight at range -- they shoot at the player instead of
+# closing to melee once they're close enough (see
+# game.systems.combat.fire_zombie_bullets and
+# game.systems.movement.move_zombies' RANGED_ZOMBIE_STOP_TILES). Base
+# zombies are melee-only and always keep closing the distance.
+RANGED_ZOMBIE_TYPES = frozenset(ZOMBIE_MERGE_TARGET.values())
+
+# Human-readable names for the end screen's "killed by" message (see
+# main.Game._apply_player_hit / render.draw's GAME_OVER overlay).
+ZOMBIE_DISPLAY_NAMES = {
+    "walker": "a Ghoul",
+    "runner": "a Demon",
+    "walker_super": "an Archghoul",
+    "runner_super": "an Archdemon",
+}
+
+# The biggest a zombie's hitbox can ever be -- used to size broad-phase
+# spatial-hash queries that need to catch a zombie by its edge, not just its
+# center (contact damage, bullet hits, AoE splash), so a search box sized for
+# the old fixed radius doesn't undershoot once "_super" zombies (radius 10)
+# exist. Derived from ENEMY_TYPES instead of hardcoded so a future bigger
+# type can't silently reintroduce the same gap.
+MAX_ZOMBIE_RADIUS = max(enemy_type.radius for enemy_type in ENEMY_TYPES.values())
 
 @dataclass(frozen=True)
 class Ability:

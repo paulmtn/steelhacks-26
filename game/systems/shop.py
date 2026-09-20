@@ -53,6 +53,7 @@ SHOP_VAN_FRAME_COUNT = 48
 SHOP_VAN_DEGREES_PER_FRAME = 360 / SHOP_VAN_FRAME_COUNT
 
 _ARRIVE_DIST = 8.0  # close enough to the destination tile's center to call it "parked"
+SHOP_MIN_DEST_COL = 40  # the van only ever picks a destination at this tile column or further right
 
 _flow_field_cache = {"tiled_map_id": None, "dest": None, "field": None}
 
@@ -80,17 +81,19 @@ def _has_room_for_hitbox(tiled_map, x, y):
     )
 
 def _pick_destination(tiled_map, current):
-    """A random walkable tile with enough room to actually park the van's
-    full hitbox there (see _has_room_for_hitbox), at least ~10 tiles from
-    where the van already is so every trip means something. Falls back to
-    the first tile found with that same room if 50 random tries can't find
-    one (e.g. a very cramped or tiny map), or the van's current spot if
-    nowhere on the map has room for it at all."""
+    """A random walkable tile at column SHOP_MIN_DEST_COL or further right
+    (the van is confined to that side of the map) with enough room to
+    actually park the van's full hitbox there (see _has_room_for_hitbox), at
+    least ~10 tiles from where the van already is so every trip means
+    something. Falls back to the first such tile found with that same room
+    if 50 random tries can't find one (e.g. a very cramped or tiny map), or
+    the van's current spot if nowhere in that range has room for it at all."""
     width, height = tiled_map.width, tiled_map.height
     tw, th = tiled_map.tile_width, tiled_map.tile_height
     cur_col, cur_row = int(current.x // tw), int(current.y // th)
+    min_col = max(3, SHOP_MIN_DEST_COL)
     for _ in range(50):
-        col = random.randrange(3, max(4, width - 3))
+        col = random.randrange(min_col, max(min_col + 1, width - 3))
         row = random.randrange(3, max(4, height - 3))
         x, y = (col + .5) * tw, (row + .5) * th
         if not _has_room_for_hitbox(tiled_map, x, y):
@@ -99,7 +102,7 @@ def _pick_destination(tiled_map, current):
             continue
         return Vec2(x, y)
     for row in range(height):
-        for col in range(width):
+        for col in range(min_col, width):
             x, y = (col + .5) * tw, (row + .5) * th
             if _has_room_for_hitbox(tiled_map, x, y):
                 return Vec2(x, y)
@@ -128,6 +131,38 @@ def shop_touching(shop, x, y, radius):
     if shop.state != "parked":
         return False
     return _overlaps(shop, x, y, radius + _TOUCH_MARGIN)
+
+_PUSH_CLEAR_MARGIN = 6.0  # extra clearance past the van's hitbox edge once pushed out
+_PUSH_CLEAR_MAX_EXTRA_STEPS = 8  # further step-outs tried if the first landing spot is itself a wall
+
+def push_clear_of_van(shop, pos, radius):
+    """A new position for a circle (pos, radius) knocked straight away from
+    the van's center -- far enough to clear its current hitbox plus a small
+    margin -- used to shove the player out from under it after a hit instead
+    of leaving them stuck overlapping it. Steps further out, one tile at a
+    time, if the first landing spot is itself inside a wall (the shove has no
+    idea what's nearby), giving up after a few extra tries and returning the
+    farthest -- and so safest -- spot tried rather than searching forever."""
+    tiled_map = get_world_map()
+    dx, dy = pos.x - shop.pos.x, pos.y - shop.pos.y
+    dist = math.hypot(dx, dy)
+    if dist < 1e-6:
+        # Exactly on the van's center (e.g. a spawn-time coincidence) -- shove
+        # opposite its current heading, or east if it isn't moving at all.
+        dx, dy = -shop.heading[0], -shop.heading[1]
+        if dx == 0 and dy == 0:
+            dx = 1
+        dist = math.hypot(dx, dy)
+    dx, dy = dx / dist, dy / dist
+    half_w, half_h = _half_extents(shop)
+    distance = math.hypot(half_w, half_h) + radius + _PUSH_CLEAR_MARGIN
+    x, y = shop.pos.x + dx * distance, shop.pos.y + dy * distance
+    for _ in range(_PUSH_CLEAR_MAX_EXTRA_STEPS):
+        if not rect_collides(tiled_map, x, y, radius, radius):
+            break
+        distance += tiled_map.tile_width
+        x, y = shop.pos.x + dx * distance, shop.pos.y + dy * distance
+    return Vec2(x, y)
 
 def shop_obstacle(shop):
     """The van's collision rectangle (x, y, half_width, half_height) while
@@ -311,6 +346,14 @@ def update_shop(shop, dt, zombies, player):
         shop.trouble_time += dt
     if shop.pos.x != before_x or shop.pos.y != before_y:
         shop.stuck_timer = 0.0
+    elif shop.pivot_timer > 0:
+        # Movement itself isn't paused by the turn animation (see the module
+        # docstring), but right at a corner _steer_minimizing_turns' fallback
+        # can momentarily return a near-zero vector before the new heading's
+        # direction takes hold -- exactly when a pivot is most likely to just
+        # have started. Don't let that one-off stall toward a real turn count
+        # the same as actually being blocked.
+        pass
     else:
         shop.stuck_timer += dt
         if shop.stuck_timer >= SHOP_STUCK_THRESHOLD and shop.backup_timer <= 0:

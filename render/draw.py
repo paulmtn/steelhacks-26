@@ -4,10 +4,10 @@ from game.config import (
     WIDTH, HEIGHT, CELL_SIZE, WORLD_WIDTH, WORLD_HEIGHT,
     MORNING_STAR_DISTANCE, ORB_ORBIT_DISTANCE,
     ORB_BULLET_SPEED, PLAYER_ANIM_FPS, SHIELD_RADIUS,
-    ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION,
+    ZOMBIE_HURT_DURATION, ZOMBIE_DEATH_DURATION, PLAYER_DEATH_DURATION,
 )
 from game.data import SHOP_ITEMS
-from game.state import GameMode
+from game.state import GameMode, combined_score, high_score_progress
 
 def draw_sprite(p,name,x,y):
     sprite=SPRITES.get(name)
@@ -29,6 +29,16 @@ def draw_player(p,player,ox,oy):
     facing index directly.
     """
     x,y=player.pos.x-ox,player.pos.y-oy
+    if player.dying:
+        sheet,colorkey=get_player_death_sheet()
+        if sheet is None:
+            draw_sprite(p,"player",x,y); return
+        row=PLAYER_6ROW_FACING_MAP[player.facing]
+        elapsed=PLAYER_DEATH_DURATION-player.death_timer
+        frame=min(PLAYER_DEATH_FRAMES-1,int(max(0.0,elapsed)*PLAYER_DEATH_FPS))
+        u,v=frame*PLAYER_FRAME_WIDTH,row*PLAYER_FRAME_HEIGHT
+        p.blt(x-PLAYER_FRAME_WIDTH//2,y-PLAYER_FRAME_HEIGHT+32,sheet,u,v,PLAYER_FRAME_WIDTH,PLAYER_FRAME_HEIGHT,colorkey)
+        return
     if player.is_moving:
         sheet,colorkey=get_player_sheet() if player.is_firing else get_walk_gun_sheet()
     else:
@@ -68,7 +78,15 @@ def draw_zombie(p,zombie,ox,oy):
         frame=min(frames-1,int(max(0.0,elapsed)*meta["anim_fps"]))
     u=frame*fw
     w=fw if zombie.facing_right else -fw
-    p.blt(x-fw//2,y-fh//2,sheet,u,0,w,fh,colorkey)
+    # "_super" zombies reuse their base type's sheet (see
+    # render.assets.ZOMBIE_BASE_TYPE) drawn at ZOMBIE_SUPER_SCALE instead of
+    # having their own art, matching their doubled hitbox radius. Sprite-only
+    # offset, shifted down-right 64px -- the hitbox (see draw_world's dev
+    # outline) and all collision stay on the zombie's real position.
+    is_super=zombie.enemy_type in ZOMBIE_BASE_TYPE
+    scale=ZOMBIE_SUPER_SCALE if is_super else 1.0
+    sx,sy=(x+48,y+48) if is_super else (x,y)
+    p.blt(sx-fw*scale/2,sy-fh*scale/2,sheet,u,0,w,fh,colorkey,scale=scale)
 
 def draw_shop(p,shop,ox,oy):
     """Draw the shop van at its current rotation frame, centered on its world
@@ -99,6 +117,70 @@ def draw_tilemap(p,tiled_map,ox,oy):
                 image,u,v,colorkey=source
                 p.blt(col*tw-ox,row*th-oy,image,u,v,tw,th,colorkey)
 
+# Cycles the title-screen demo sprite through its four movement/firing
+# sheets (see draw_player) so a new player can see every animation without
+# touching a key.
+MENU_DEMO_CYCLE = ("idle", "walk", "shooting", "walk_shooting")
+MENU_DEMO_STATE_DURATION = 1.4  # seconds each sheet plays before cycling to the next
+
+def draw_start_menu(p, elapsed):
+    """Title screen: game title centered on a black panel, with the player
+    sprite demoing its idle/walk/shooting animations centered beneath it."""
+    p.cls(BG)
+    title = "THE GAME OF JOB"
+    panel_width, panel_height = 170, 22
+    panel_x, panel_y = (WIDTH - panel_width) // 2, 16
+    p.rect(panel_x, panel_y, panel_width, panel_height, PANEL)
+    p.rectb(panel_x, panel_y, panel_width, panel_height, TEXT)
+    p.text(WIDTH // 2 - len(title) * 2, panel_y + panel_height // 2 - 2, title, TEXT)
+
+    demo_state = MENU_DEMO_CYCLE[int(elapsed // MENU_DEMO_STATE_DURATION) % len(MENU_DEMO_CYCLE)]
+    is_moving = demo_state in ("walk", "walk_shooting")
+    is_firing = demo_state in ("shooting", "walk_shooting")
+    if is_moving:
+        sheet, colorkey = get_player_sheet() if is_firing else get_walk_gun_sheet()
+    else:
+        sheet, colorkey = get_shooting_sheet() if is_firing else get_idle_gun_sheet()
+    x, y = WIDTH // 2, 84
+    if sheet is None:
+        draw_sprite(p, "player", x, y)
+    else:
+        row = 0 if is_firing else PLAYER_6ROW_FACING_MAP[0]
+        frame = int(elapsed * PLAYER_ANIM_FPS) % PLAYER_FRAMES_PER_DIR
+        u, v = frame * PLAYER_FRAME_WIDTH, row * PLAYER_FRAME_HEIGHT
+        p.blt(x - PLAYER_FRAME_WIDTH // 2, y - PLAYER_FRAME_HEIGHT + 32, sheet, u, v, PLAYER_FRAME_WIDTH, PLAYER_FRAME_HEIGHT, colorkey)
+
+    prompt = "PRESS ANY KEY TO START"
+    p.text(WIDTH // 2 - len(prompt) * 2, HEIGHT - 12, prompt, TEXT)
+
+def draw_high_score_ring(p, cx, cy, radius, progress):
+    """The high score, ringed by a clockwise progress arc (from 12 o'clock)
+    showing how close this run's live combined_score() is to it -- a full
+    circle once it's reached or beaten (see game.state.high_score_progress).
+    A second, concentric ring tracks progress.score_ring_radius: each kill
+    bumps it up by score/10 (see progression.cleanup_dead), and it decays by
+    1 every frame (see main.Game.update), giving it a smooth rise-then-fall
+    pulse instead of jumping straight to a per-second total.
+    A "HI" label sits immediately left of the ring, right-aligned so its
+    last character touches the ring's left edge.
+    """
+    p.text(cx - radius - 8, cy - 3, "HI", 7)
+    p.circb(cx, cy, radius, 0)
+    ratio = high_score_progress(progress)
+    if ratio > 0:
+        start = -math.pi / 2
+        end = start + ratio * 2 * math.pi
+        steps = max(1, int(radius * (end - start)))
+        for step in range(steps + 1):
+            angle = start + (end - start) * step / steps
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            p.pset(cx + cos_a * radius, cy + sin_a * radius, 7)
+            p.pset(cx + cos_a * (radius - 1), cy + sin_a * (radius - 1), 7)
+    label = str(progress.high_score)
+    label_color = 0 if ratio >= 1.0 else 7
+    p.text(cx - len(label) * 2, cy - 3, label, label_color)
+    p.circb(cx, cy, progress.score_ring_radius, 6)
+
 def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
                demo_mode=False):
     p.cls(BG); ox,oy=camera.x,camera.y
@@ -113,7 +195,7 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
         angle = player.orb_angle + (2 * math.pi * orb_index / progress.orb_count)
         orb_x = player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE
         orb_y = player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE
-        p.circ(orb_x-ox, orb_y-oy, 3, 10)
+        p.circ(orb_x-ox, orb_y-oy, 3, 3)
     if progress.shield_hits > 0 or progress.shield_regen_timer > 0:
         p.circb(
             player.pos.x-ox,
@@ -131,30 +213,51 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
             p.circ(star_x, star_y, 4, 8)
             p.line(star_x-5, star_y, star_x+5, star_y, 10)
             p.line(star_x, star_y-5, star_x, star_y+5, 10)
-    for z in pools.zombies.active(): draw_zombie(p,z,ox,oy)
+    # Painter's algorithm: draw farthest-back (highest y) first so a zombie
+    # further forward (lower y) always overlaps one further back, instead of
+    # z-order depending on arbitrary pool/spawn order.
+    for z in sorted(pools.zombies.active(), key=lambda z: z.pos.y, reverse=True):
+        draw_zombie(p,z,ox,oy)
+        if dev and z.enemy_type in ZOMBIE_BASE_TYPE:
+            # Testing aid: outline the "_super" zombies' actual (doubled)
+            # collision hitbox, since it no longer matches a plain zombie's.
+            p.rectb(z.pos.x-ox-z.radius,z.pos.y-oy-z.radius,z.radius*2,z.radius*2,TEXT)
     for b in pools.bullets.active(): p.circ(b.pos.x-ox,b.pos.y-oy,round(b.radius),7)
+    # "_super" zombie fire (see game.systems.combat.fire_zombie_bullets) --
+    # colored to read as hostile, unlike the player's own white bullets.
+    for b in pools.enemy_bullets.active(): p.circ(b.pos.x-ox,b.pos.y-oy,round(b.radius),8)
     for effect in pools.particles.active():
-        if effect.kind == "beam":
-            p.line(
-                effect.pos.x-ox,
-                effect.pos.y-oy,
-                effect.pos.x-ox + effect.vx * ORB_BULLET_SPEED,
-                effect.pos.y-oy + effect.vy * ORB_BULLET_SPEED,
-                10,
-            )
-        elif effect.kind == "lightning":
+        # Beam/lightning/hail re-derive their endpoints from their live
+        # source/target entities (see Particle.source/target) every frame,
+        # so the line stays stretched between wherever they currently are
+        # instead of freezing -- or rigidly translating -- at the positions
+        # they had the instant the effect was fired. A dead/missing entity
+        # falls back to the static spawn-time pos/vx,vy.
+        if effect.source is not None and effect.source.active:
+            start_x, start_y = effect.source.pos.x - ox, effect.source.pos.y - oy
+        else:
             start_x, start_y = effect.pos.x - ox, effect.pos.y - oy
-            end_x, end_y = start_x + effect.vx, start_y + effect.vy
+        if effect.target is not None and effect.target.active:
+            end_x, end_y = effect.target.pos.x - ox, effect.target.pos.y - oy
+        else:
+            end_x, end_y = effect.pos.x - ox + effect.vx * (
+                ORB_BULLET_SPEED if effect.kind == "beam" else 1
+            ), effect.pos.y - oy + effect.vy * (
+                ORB_BULLET_SPEED if effect.kind == "beam" else 1
+            )
+        if effect.kind == "beam":
+            p.line(start_x, start_y, end_x, end_y, 3)
+        elif effect.kind == "lightning":
             mid_x, mid_y = (start_x + end_x) / 2, (start_y + end_y) / 2
-            perp_x, perp_y = -effect.vy, effect.vx
+            perp_x, perp_y = -(end_y - start_y), end_x - start_x
             length = max(1.0, math.hypot(perp_x, perp_y))
             offset_x, offset_y = perp_x / length * 5, perp_y / length * 5
             p.line(start_x, start_y, mid_x + offset_x, mid_y + offset_y, 10)
             p.line(mid_x + offset_x, mid_y + offset_y, end_x - offset_x, end_y - offset_y, 10)
             p.line(end_x - offset_x, end_y - offset_y, end_x, end_y, 10)
-            p.circ(end_x, end_y, effect.radius, 10)
+            p.circb(end_x, end_y, effect.radius, 10)
         elif effect.kind == "hail":
-            x, y = effect.pos.x - ox, effect.pos.y - oy
+            x, y = start_x, start_y
             cloud_y = y - effect.radius * 0.45
             p.circ(x - 16, cloud_y, 8, 7)
             p.circ(x - 5, cloud_y - 4, 10, 7)
@@ -165,10 +268,13 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
                 start_y = cloud_y + 7
                 p.line(x + hail_x, start_y, x + hail_x - 2, start_y + hail_length, 13)
             p.circb(x, y, effect.radius, 13)
+        elif effect.kind == "xp_text":
+            p.text(start_x - 4, start_y, f"+{int(effect.amount)}", 13)
     for item in pools.pickups.active(): draw_sprite(p,item.kind,item.pos.x-ox,item.pos.y-oy)
     mins=int(progress.survival_time)//60; secs=int(progress.survival_time)%60
     p.text(4,3,f"{mins:02d}:{secs:02d} LV{progress.level} XP {int(progress.xp)}/{progress.xp_to_next}",TEXT)
-    p.text(4,11,f"GEMS {progress.gems} GOLD {progress.coins} SCORE {progress.score}",TEXT)
+    p.text(4,11,f"GEMS {progress.gems} GOLD {progress.coins} SCORE {combined_score(progress)}",TEXT)
+    draw_high_score_ring(p, WIDTH-16, 14, 12, progress)
     if progress.extra_lives > 0:
         p.circ(7,31,3,8)
         p.circ(12,31,3,8)
@@ -183,19 +289,25 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
             if item.name in progress.shop_inventory
         ]
         cards_overlay(p, "MERCHANT", shop_items, show_cost=True, footer="E close", progress=progress)
+    elif mode==GameMode.LEVEL_UP_INTRO: overlay(p,"LEVEL UP","Like Job before you, you are challenged by Satan. By a greater power's blessings, you may endure.",center=True)
     elif mode==GameMode.UPGRADES: overlay(p,"UPGRADES","1 Damage  2 Vitality  3 Magnet  U close")
     elif mode==GameMode.LEVEL_UP:
         cards_overlay(p, "LEVEL UP", progress.ability_choices, footer="Choose 1, 2, or 3")
-    elif mode==GameMode.GAME_OVER: overlay(p,"YOU DIED","R restart")
+    elif mode==GameMode.GAME_OVER:
+        cause=f"Killed by {progress.death_cause}." if progress.death_cause else "You died."
+        final=combined_score(progress)
+        record=" New high score!" if final>=progress.high_score else f" High score {progress.high_score}."
+        overlay(p,"YOU DIED",f"{cause} Score {final}.{record} R restart")
     if dev:
         status = "DEMO 3X" if demo_mode else "NORMAL"
         p.text(4,HEIGHT-8,f"F2 demo: {status} | z:{len(list(pools.zombies.active()))}",13)
-def overlay(p,title,hint):
+def overlay(p,title,hint,center=False):
     p.rect(12,38,232,78,PANEL)
     p.rectb(12,38,232,78,TEXT)
     p.text(92,44,title,10)
     for index, line in enumerate(wrap_text(hint, 38)[:4]):
-        p.text(20,62 + index * 8,line,TEXT)
+        x = WIDTH // 2 - len(line) * 2 if center else 20
+        p.text(x,62 + index * 8,line,TEXT)
 
 def cards_overlay(p, title, items, show_cost=False, footer="", progress=None):
     """Draw bounded level-up cards or a four-item shop grid."""
