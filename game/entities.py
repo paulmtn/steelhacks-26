@@ -29,6 +29,8 @@ class Player(Entity):
     invulnerable: float = 0
     facing: int = 0       # sprite row: 0=S,1=SW,2=NW,3=N,4=NE,5=SE,6=E,7=W
     anim_time: float = 0  # seconds elapsed, used to pick the walk-cycle column
+    is_firing: bool = False  # has a live auto-fire target; picks which sheet draw_player uses
+    is_moving: bool = False  # holding a movement key; walk-cycle sheets vs stationary ones
     orb_active: bool = False
     orb_count: int = 0
     orb_angle: float = 0.0

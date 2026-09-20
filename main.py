@@ -56,6 +56,7 @@ class Game:
             return
         dx=(pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT))-(pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT))
         dy=(pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN))-(pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP))
+        self.player.is_moving=bool(dx or dy)
         move_player(
             self.player,
             dx,
@@ -107,6 +108,7 @@ class Game:
         aim_dx,aim_dy=(target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y) if target else (0,0)
         update_player_facing(self.player,dx,dy,aim_dx,aim_dy)
         self.player.anim_time+=dt
+        self.player.is_firing=bool(target)
         if target and self.fire_clock<=0:
             dx,dy=target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y; d=math.hypot(dx,dy) or 1
             for shot in range(self.progress.shots):
