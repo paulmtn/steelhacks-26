@@ -42,3 +42,6 @@ Thumbs.db
 # Local Pyxel-generated or temporary files
 *.pyxel
 *.tmp
+
+# Per-player persisted high score (see game.save)
+/save.json

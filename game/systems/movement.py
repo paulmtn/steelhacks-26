@@ -1,6 +1,6 @@
 import math
-from game.config import WORLD_WIDTH, WORLD_HEIGHT
-from game.data import ENEMY_TYPES
+from game.config import WORLD_WIDTH, WORLD_HEIGHT, RANGED_ZOMBIE_STOP_TILES
+from game.data import ENEMY_TYPES, RANGED_ZOMBIE_TYPES
 from game.tilemap import get_world_map, rect_collides, compute_distance_field, is_solid_tile
 
 # Sprite row for each 45-degree compass bucket, starting at East (0) and going
@@ -126,7 +126,16 @@ def move_zombies(zombies, player, dt, speed, obstacle=None):
     target_row=max(0,min(tiled_map.height-1,int(player.pos.y//th)))
     field=_flow_field_to(tiled_map,target_col,target_row,obstacle)
     blocked_tiles=_obstacle_tiles(tiled_map,obstacle)
+    stop_dist_sq=(RANGED_ZOMBIE_STOP_TILES*tw)**2
     for z in zombies:
+        if z.enemy_type in RANGED_ZOMBIE_TYPES:
+            # Close enough to shoot instead of closing further (see
+            # game.systems.combat.fire_zombie_bullets) -- hold position, just
+            # keep facing the player so its shots still look aimed.
+            pdx,pdy=player.pos.x-z.pos.x,player.pos.y-z.pos.y
+            if pdx*pdx+pdy*pdy<=stop_dist_sq:
+                if pdx: z.facing_right=pdx>0
+                continue
         dx,dy=_steer_along_field(tiled_map,field,z.pos.x,z.pos.y,player.pos.x,player.pos.y,blocked_tiles)
         d=(dx*dx+dy*dy)**.5 or 1
         actual=ENEMY_TYPES.get(z.enemy_type, ENEMY_TYPES["walker"]).speed + speed - 18

@@ -1,7 +1,8 @@
 """Fixed-layout entity records; inactive records are reused by pools."""
 from dataclasses import dataclass
+import math
 from game.data import Vec2
-from game.config import PICKUP_LIFETIME
+from game.config import PICKUP_LIFETIME, ORB_ORBIT_DISTANCE
 
 @dataclass
 class Entity:
@@ -24,7 +25,6 @@ class Player(Entity):
     xp: float = 0
     level: int = 1
     gems: int = 0
-    magnet: float = 48
     shots: int = 1
     invulnerable: float = 0
     facing: int = 0       # sprite row: 0=S,1=SW,2=NW,3=N,4=NE,5=SE,6=E,7=W
@@ -35,6 +35,28 @@ class Player(Entity):
     orb_count: int = 0
     orb_angle: float = 0.0
     orb_fire_timer: float = 0.0
+    dying: bool = False        # true once health hits 0; plays the death sheet once (see draw_player)
+    death_timer: float = 0.0   # counts down the death sheet's duration; holds on the last frame at 0
+
+class OrbAnchor:
+    """Live stand-in for one orbiting orb, used as a beam Particle's source
+    (see Particle.source) so the drawn beam tracks that orb's *current*
+    orbit position -- not the player's -- for its short life, instead of
+    freezing at (or being anchored to the player's) fire-time position."""
+    def __init__(self, player, orb_index, orb_count):
+        self.player, self.orb_index, self.orb_count = player, orb_index, orb_count
+
+    @property
+    def active(self):
+        return self.player.active
+
+    @property
+    def pos(self):
+        angle = self.player.orb_angle + (2 * math.pi * self.orb_index / self.orb_count)
+        return Vec2(
+            self.player.pos.x + math.cos(angle) * ORB_ORBIT_DISTANCE,
+            self.player.pos.y + math.sin(angle) * ORB_ORBIT_DISTANCE,
+        )
 
 @dataclass
 class Zombie(Entity):
@@ -47,18 +69,35 @@ class Zombie(Entity):
     hurt_timer: float = 0.0    # counts down while showing the brief "hurt" flash sheet
     dying: bool = False        # true from the killing blow until its death animation finishes
     death_timer: float = 0.0   # counts down the "death" sheet; released from the pool at 0
+    fire_timer: float = 0.0    # counts down between shots -- only "_super" zombies ever fire
+                                # (see game.systems.combat.fire_zombie_bullets)
 
 @dataclass
 class Bullet(Entity):
     radius: float = 2
     ttl: float = 1.5
     kind: str = "bullet"
+    # Shooter's enemy_type, set only by fire_zombie_bullets -- lets the end
+    # screen say which zombie type's gunfire killed the player (see
+    # update_enemy_bullets' on_hit callback). Unused by the player's own bullets.
+    enemy_type: str = ""
 
 @dataclass
 class Particle(Entity):
     radius: float = 1
     ttl: float = .5
     kind: str = "particle"
+    # Live endpoints for beam/lightning effects: whatever entity fired it
+    # (the player, or the previously struck zombie in a lightning chain) and
+    # whatever it's hitting. draw_world reads their *current* .pos each frame
+    # so the line stays stretched between the two while they move, instead of
+    # freezing at (or rigidly translating) the positions they had when the
+    # effect was fired. None falls back to the static spawn-time pos/vx/vy.
+    source: object = None
+    target: object = None
+    # Amount shown by a "xp_text" popup (see progression.cleanup_dead); unused
+    # by every other kind.
+    amount: float = 0
 
 @dataclass
 class Pickup(Entity):
