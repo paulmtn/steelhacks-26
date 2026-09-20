@@ -22,14 +22,26 @@ def update_player_facing(player, move_dx, move_dy, aim_dx, aim_dy):
     if aim_dx or aim_dy: player.facing = _facing_row(aim_dx, aim_dy)
     elif move_dx or move_dy: player.facing = _facing_row(move_dx, move_dy)
 
-def move_player(player, dx, dy, dt, speed, width=WORLD_WIDTH, height=WORLD_HEIGHT):
+def _blocked_by_obstacle(obstacle, x, y, half_w, half_h):
+    """obstacle: an optional (x, y, half_width, half_height) solid rectangle
+    besides tile walls -- e.g. the parked shop van (see
+    game.systems.shop.shop_obstacle). A moving van doesn't use this; it deals
+    damage instead (see game.systems.shop.update_shop)."""
+    if obstacle is None:
+        return False
+    ox, oy, ohw, ohh = obstacle
+    return abs(x - ox) <= half_w + ohw and abs(y - oy) <= half_h + ohh
+
+def move_player(player, dx, dy, dt, speed, width=WORLD_WIDTH, height=WORLD_HEIGHT, obstacle=None):
     length=(dx*dx+dy*dy)**.5
     if length: dx,dy=dx/length,dy/length
     tiled_map=get_world_map(); half=player.radius
     new_x=max(3*16,min(width-3*16,player.pos.x+dx*speed*dt))
-    if not rect_collides(tiled_map,new_x,player.pos.y,half,half): player.pos.x=new_x
+    if not rect_collides(tiled_map,new_x,player.pos.y,half,half) and not _blocked_by_obstacle(obstacle,new_x,player.pos.y,half,half):
+        player.pos.x=new_x
     new_y=max(3*16,min(height-3*16,player.pos.y+dy*speed*dt))
-    if not rect_collides(tiled_map,player.pos.x,new_y,half,half): player.pos.y=new_y
+    if not rect_collides(tiled_map,player.pos.x,new_y,half,half) and not _blocked_by_obstacle(obstacle,player.pos.x,new_y,half,half):
+        player.pos.y=new_y
 
 # Pathing for zombies is a shared flow field, not per-zombie search: one BFS
 # (game.tilemap.compute_distance_field) from the player's tile gives every
@@ -83,7 +95,7 @@ def _steer_along_field(tiled_map, field, zx, zy, px, py):
                 best_dx, best_dy = (ncol + .5) * tw - zx, (nrow + .5) * th - zy
     return best_dx, best_dy
 
-def move_zombies(zombies, player, dt, speed):
+def move_zombies(zombies, player, dt, speed, obstacle=None):
     tiled_map=get_world_map()
     tw,th=tiled_map.tile_width,tiled_map.tile_height
     target_col=max(0,min(tiled_map.width-1,int(player.pos.x//tw)))
@@ -95,8 +107,10 @@ def move_zombies(zombies, player, dt, speed):
         actual=ENEMY_TYPES.get(z.enemy_type, ENEMY_TYPES["walker"]).speed + speed - 18
         half=z.radius
         new_x=z.pos.x+dx/d*actual*dt
-        if not rect_collides(tiled_map,new_x,z.pos.y,half,half): z.pos.x=new_x
+        if not rect_collides(tiled_map,new_x,z.pos.y,half,half) and not _blocked_by_obstacle(obstacle,new_x,z.pos.y,half,half):
+            z.pos.x=new_x
         new_y=z.pos.y+dy/d*actual*dt
-        if not rect_collides(tiled_map,z.pos.x,new_y,half,half): z.pos.y=new_y
+        if not rect_collides(tiled_map,z.pos.x,new_y,half,half) and not _blocked_by_obstacle(obstacle,z.pos.x,new_y,half,half):
+            z.pos.y=new_y
         if dx: z.facing_right=dx>0
         z.anim_time+=dt*actual/18  # walk-cycle plays faster/slower with the zombie's own speed

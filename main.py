@@ -6,7 +6,7 @@ except ImportError:
     pyxel = None
 from game.config import *
 from game.data import Vec2, SHOP_ITEMS
-from game.entities import Player
+from game.entities import Player, Shop
 from game.pools import EntityPools
 from game.spatial_hash import SpatialHash
 from game.state import GameMode, PlayerProgress, StateMachine
@@ -16,6 +16,7 @@ from game.systems.combat import (
     strike_lightning_chain, update_bullets,
 )
 from game.systems.spawn import spawn_zombie
+from game.systems.shop import update_shop, shop_obstacle, shop_touching
 from game.systems.progression import cleanup_dead, collect_pickups, buy, apply_ability, buy_permanent
 from render.draw import draw_world
 from render.assets import load_assets
@@ -25,14 +26,15 @@ class Game:
         self.state=StateMachine(); self.progress=PlayerProgress()
         self.pools=EntityPools(MAX_ZOMBIES,MAX_BULLETS,MAX_PARTICLES,MAX_PICKUPS)
         self.grid=SpatialHash(); self.player=Player(active=True,pos=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2))
-        self.merchant=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2+55); self.spawn_clock=0; self.fire_clock=0
+        self.shop=Shop(pos=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2+55),park_timer=SHOP_PARK_DURATION)
+        self.spawn_clock=0; self.fire_clock=0
         self.dev=False; self.demo_mode=False; self.hitboxes=False
         self.camera=Vec2(); self.last=time.perf_counter()
     def restart(self): self.__init__()
     def update(self, dt):
         if self.state.mode == GameMode.GAME_OVER: return
         if self.state.mode == GameMode.SHOP:
-            near=self._near_merchant()
+            near=self._near_shop()
             if not near: self.state.transition(GameMode.PLAYING); return
             if pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.PLAYING)
             for key,name in ((pyxel.KEY_1,'heal'),(pyxel.KEY_2,'damage'),(pyxel.KEY_3,'speed')):
@@ -50,7 +52,8 @@ class Game:
             return
         dx=(pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT))-(pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT))
         dy=(pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN))-(pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP))
-        move_player(self.player,dx,dy,dt,PLAYER_SPEED+self.progress.speed_bonus)
+        obstacle=shop_obstacle(self.shop)
+        move_player(self.player,dx,dy,dt,PLAYER_SPEED+self.progress.speed_bonus,obstacle=obstacle)
         if self.progress.orb_active:
             self.player.orb_angle = (self.player.orb_angle + dt * 2.5) % (2 * math.pi)
             self.player.orb_fire_timer = max(0.0, self.player.orb_fire_timer - dt)
@@ -75,7 +78,17 @@ class Game:
             self.spawn_clock=max(.12,SPAWN_INTERVAL/(1+self.progress.survival_time/90))
         zombies=list(self.pools.zombies.active()); self.grid.clear()
         for z in zombies: self.grid.insert(z)
-        move_zombies(zombies,self.player,dt,ZOMBIE_SPEED+self.progress.wave*.5)
+        move_zombies(zombies,self.player,dt,ZOMBIE_SPEED+self.progress.wave*.5,obstacle=obstacle)
+        if update_shop(self.shop,dt,zombies,self.player):
+            if self.progress.shield_hits > 0:
+                self.progress.shield_hits -= 1
+                self.progress.shield_ready = self.progress.shield_hits > 0
+                if self.progress.shield_hits == 0:
+                    self.progress.shield_regen_timer = SHIELD_REGEN_TIME
+                self.player.invulnerable = CONTACT_INVULN
+            else:
+                self.progress.health = 0
+                self.player.invulnerable = CONTACT_INVULN
         for z in self.grid.query(self.player.pos.x,self.player.pos.y,24):
             if self.player.invulnerable<=0 and (z.pos.x-self.player.pos.x)**2+(z.pos.y-self.player.pos.y)**2 < 100:
                 if self.progress.shield_hits > 0:
@@ -169,7 +182,7 @@ class Game:
         )
         if collect_pickups(self.player,self.pools.pickups.active(),self.progress,dt): self.state.transition(GameMode.LEVEL_UP)
         self.progress.wave=1+int(self.progress.score/200)
-        if (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 18**2 and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)
+        if self._near_shop() and pyxel.btnp(pyxel.KEY_E): self.state.transition(GameMode.SHOP)
         if self.progress.health<=0: self.state.transition(GameMode.GAME_OVER)
     def input(self):
         if pyxel.btnp(pyxel.KEY_F3): self.dev=not self.dev
@@ -185,9 +198,10 @@ class Game:
         if self.state.mode==GameMode.GAME_OVER and pyxel.btnp(pyxel.KEY_R): self.restart()
     def draw(self): draw_world(
         pyxel, self.player, self.pools, self.progress, self.state.mode,
-        self.camera, self.merchant, self.dev, self.demo_mode,
+        self.camera, self.shop, self.dev, self.demo_mode,
     )
-    def _near_merchant(self): return (self.player.pos.x-self.merchant.x)**2+(self.player.pos.y-self.merchant.y)**2 < 24**2
+    def _near_shop(self):
+        return shop_touching(self.shop, self.player.pos.x, self.player.pos.y, self.player.radius)
     def run(self):
         pyxel.init(WIDTH,HEIGHT,title='Night Shift',fps=FPS)
         resource_path = os.path.join(os.path.dirname(__file__), "assets.pyxres")
