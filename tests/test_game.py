@@ -1,12 +1,12 @@
 from game.pools import Pool
-from game.entities import Zombie
+from game.entities import Zombie, Bullet
 from game.data import ABILITIES, SHOP_ITEMS, Vec2
 from game.spatial_hash import SpatialHash
 from game.state import StateMachine, GameMode, PlayerProgress
 from game.entities import Player, Pickup
 from game.systems.progression import buy, collect_pickups, cleanup_dead, tick_zombie_hit_effects
 from game.pools import EntityPools
-from game.systems.combat import nearest_target
+from game.systems.combat import nearest_target, update_bullets
 from game.systems.movement import move_player, move_zombies
 from game.tilemap import get_world_map, TiledMap, compute_distance_field
 from game.systems.combat import fire_beam
@@ -264,6 +264,49 @@ def test_nearest_target_ignores_enemies_behind_the_van(monkeypatch):
     assert nearest_target(
         player, [near_but_hidden, far_but_visible], grid, max_range=200, obstacle=obstacle,
     ) is far_but_visible
+
+def test_bullets_are_destroyed_by_the_parked_van():
+    """Bullets otherwise fly clean through everything but zombies -- there's
+    no wall collision for them at all -- but the van is a physical obstacle
+    like the player and zombies are (see shop_obstacle), so a bullet flying
+    into it should be destroyed there instead of passing through to
+    whatever's behind it."""
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 400, 500
+    bullet.vx, bullet.vy = 200, 0
+    bullet.ttl, bullet.radius = 1.5, 2
+
+    shop = Shop(pos=Vec2(500, 500), state="parked", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+
+    for _ in range(120):
+        update_bullets(pool, [], 1 / 60, 2000, 2000, obstacle=obstacle)
+        if not bullet.active:
+            break
+    else:
+        raise AssertionError("bullet was never stopped by the van")
+    # Destroyed at/before the van's near edge -- proves it didn't fly through
+    # to the far side (which would put it well past x=500).
+    assert bullet.pos.x < 500
+
+def test_bullets_pass_through_a_driving_van():
+    """A moving van doesn't block anything -- it deals contact damage
+    instead (see game.systems.shop.update_shop) -- so shop_obstacle returns
+    None while driving and bullets must fly straight through it."""
+    pool = Pool(Bullet, 1)
+    bullet = pool.acquire()
+    bullet.pos.x, bullet.pos.y = 400, 500
+    bullet.vx, bullet.vy = 200, 0
+    bullet.ttl, bullet.radius = 1.5, 2
+
+    shop = Shop(pos=Vec2(500, 500), state="driving", orientation="horizontal")
+    obstacle = shop_obstacle(shop)
+    assert obstacle is None
+
+    for _ in range(60):
+        update_bullets(pool, [], 1 / 60, 2000, 2000, obstacle=obstacle)
+    assert bullet.active and bullet.pos.x > 500
 
 def test_demo_mode_triples_pickup_rewards():
     pools = EntityPools(1, 1, 1, 2)

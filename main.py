@@ -132,7 +132,7 @@ class Game:
         self.player.is_firing=bool(target)
         if target and self.fire_clock<=0:
             dx,dy=target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y; d=math.hypot(dx,dy) or 1
-            ramp=min(1.0,self.progress.sharpshooter_count/BULLET_SHARPSHOOTER_RAMP)
+            ramp=min(1.0,max(0,self.progress.damage-1)/BULLET_DAMAGE_RAMP)
             bullet_radius=BULLET_COIN_RADIUS+(BULLET_FULL_RADIUS-BULLET_COIN_RADIUS)*ramp
             for shot in range(self.progress.shots):
                 spread=(shot-(self.progress.shots-1)/2)*.12
@@ -192,7 +192,7 @@ class Game:
                 + max(0, self.progress.damage - 1),
             )
             self.progress.hail_timer = HAIL_RATE
-        update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
+        update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid,obstacle=obstacle)
         # Anything that lost hp this frame but is still alive flashes its
         # "hurt" sheet; the ones that hit 0 are instead marked dying below.
         for z in zombies:
