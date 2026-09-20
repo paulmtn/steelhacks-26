@@ -1,10 +1,10 @@
 from game.tilemap import get_world_map, has_line_of_sight
 import random
 
-def fire(pool, x,y, dx,dy, speed, damage):
+def fire(pool, x,y, dx,dy, speed, damage, radius):
     b=pool.acquire()
     if not b:return None
-    b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl=x,y,dx*speed,dy*speed,1,damage,1.5
+    b.pos.x,b.pos.y,b.vx,b.vy,b.hp,b.damage,b.ttl,b.radius=x,y,dx*speed,dy*speed,1,damage,1.5,radius
     return b
 
 def fire_beam(effect_pool, zombies, spatial_hash, x, y, dx, dy,
@@ -101,7 +101,7 @@ def hail_burst(effect_pool, zombies, spatial_hash, x, y, radius, damage):
         effect.radius, effect.ttl, effect.kind = radius, 0.35, "hail"
 
 def nearest_target(player, zombies, spatial_hash=None, max_range=260,
-                   viewport=None):
+                   viewport=None, obstacle=None):
     candidates = spatial_hash.query(player.pos.x, player.pos.y, max_range) if spatial_hash else zombies
     if viewport is not None:
         left, top, width, height = viewport
@@ -113,17 +113,26 @@ def nearest_target(player, zombies, spatial_hash=None, max_range=260,
     tiled_map = get_world_map()
     candidates = (
         z for z in candidates
-        if z.active and has_line_of_sight(tiled_map, player.pos.x, player.pos.y, z.pos.x, z.pos.y)
+        if z.active and has_line_of_sight(tiled_map, player.pos.x, player.pos.y, z.pos.x, z.pos.y, obstacle)
     )
     return min(candidates,
                key=lambda z:(z.pos.x-player.pos.x)**2+(z.pos.y-player.pos.y)**2,
                default=None)
 
-def update_bullets(pool, zombies, dt, width, height, spatial_hash=None):
+def update_bullets(pool, zombies, dt, width, height, spatial_hash=None, obstacle=None):
+    """obstacle: an optional (x, y, half_width, half_height) solid rectangle
+    besides the zombies bullets can hit -- e.g. the parked shop van (see
+    game.systems.shop.shop_obstacle). A bullet that flies into it is
+    destroyed there instead of passing through, same as it would a wall if
+    walls stopped bullets."""
     hits=[]
     for b in pool.active():
         b.pos.x+=b.vx*dt; b.pos.y+=b.vy*dt; b.ttl-=dt
         if b.ttl<=0 or not(0<=b.pos.x<=width and 0<=b.pos.y<=height): pool.release(b); continue
+        if obstacle is not None:
+            ox, oy, ohw, ohh = obstacle
+            if abs(b.pos.x-ox) <= b.radius+ohw and abs(b.pos.y-oy) <= b.radius+ohh:
+                pool.release(b); continue
         candidates = spatial_hash.query(b.pos.x, b.pos.y, b.radius + 6) if spatial_hash else zombies
         for z in candidates:
             if not z.active:

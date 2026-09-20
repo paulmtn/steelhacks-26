@@ -32,6 +32,22 @@ def _blocked_by_obstacle(obstacle, x, y, half_w, half_h):
     ox, oy, ohw, ohh = obstacle
     return abs(x - ox) <= half_w + ohw and abs(y - oy) <= half_h + ohh
 
+def _obstacle_tiles(tiled_map, obstacle):
+    """The tile coords an (x, y, half_width, half_height) obstacle rect (e.g.
+    the parked shop van) currently covers, fed to compute_distance_field as
+    extra blocked cells -- so the zombie flow field routes around it, rather
+    than running the BFS as though it weren't there and then just bumping
+    zombies into its edge one _blocked_by_obstacle step at a time."""
+    if obstacle is None:
+        return frozenset()
+    ox, oy, ohw, ohh = obstacle
+    tw, th = tiled_map.tile_width, tiled_map.tile_height
+    col_start, col_end = int((ox - ohw) // tw), int((ox + ohw) // tw)
+    row_start, row_end = int((oy - ohh) // th), int((oy + ohh) // th)
+    return frozenset(
+        (c, r) for r in range(row_start, row_end + 1) for c in range(col_start, col_end + 1)
+    )
+
 def move_player(player, dx, dy, dt, speed, width=WORLD_WIDTH, height=WORLD_HEIGHT, obstacle=None):
     length=(dx*dx+dy*dy)**.5
     if length: dx,dy=dx/length,dy/length
@@ -49,29 +65,34 @@ def move_player(player, dx, dy, dt, speed, width=WORLD_WIDTH, height=WORLD_HEIGH
 # tile's value plus its 8 neighbors' -- O(1) per zombie per frame. This is
 # what keeps "shortest path for every zombie" cheap regardless of zombie
 # count, versus running A*/BFS separately per zombie.
-_flow_field_cache = {"tiled_map_id": None, "target": None, "field": None}
+_flow_field_cache = {"tiled_map_id": None, "target": None, "obstacle": None, "field": None}
 
-def _flow_field_to(tiled_map, target_col, target_row):
+def _flow_field_to(tiled_map, target_col, target_row, obstacle=None):
     """The cached BFS distance field rooted at (target_col, target_row),
-    recomputed only when the player has moved into a different tile (or the
-    world map instance changed) since the last call."""
+    recomputed only when the player has moved into a different tile, the
+    world map instance changed, or the van's blocked-tile footprint changed
+    (it starts/stops parking, or parks somewhere new) since the last call."""
     cache = _flow_field_cache
     key = (target_col, target_row)
-    if cache["tiled_map_id"] is not tiled_map or cache["target"] != key:
-        cache["field"] = compute_distance_field(tiled_map, target_col, target_row)
+    if cache["tiled_map_id"] is not tiled_map or cache["target"] != key or cache["obstacle"] != obstacle:
+        cache["field"] = compute_distance_field(
+            tiled_map, target_col, target_row, _obstacle_tiles(tiled_map, obstacle),
+        )
         cache["tiled_map_id"] = tiled_map
         cache["target"] = key
+        cache["obstacle"] = obstacle
     return cache["field"]
 
 _ORTHOGONAL_STEPS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 _DIAGONAL_STEPS = ((1, 1), (1, -1), (-1, 1), (-1, -1))
 
-def _steer_along_field(tiled_map, field, zx, zy, px, py):
+def _steer_along_field(tiled_map, field, zx, zy, px, py, blocked_tiles=frozenset()):
     """Direction (unnormalized) from (zx, zy) toward the player: one tile-step
     of steepest descent on the BFS field (checked across all 8 neighbors, with
-    diagonals only taken when neither flanking wall corner blocks them), or a
-    direct line when the field can't help -- already in the player's tile, or
-    cut off from it entirely by walls (an unreachable pocket)."""
+    diagonals only taken when neither flanking wall corner -- or blocked_tiles
+    cell, e.g. the parked shop van -- blocks them), or a direct line when the
+    field can't help -- already in the player's tile, or cut off from it
+    entirely by walls (an unreachable pocket)."""
     tw, th = tiled_map.tile_width, tiled_map.tile_height
     width, height = tiled_map.width, tiled_map.height
     col, row = int(zx // tw), int(zy // th)
@@ -90,7 +111,10 @@ def _steer_along_field(tiled_map, field, zx, zy, px, py):
         ncol, nrow = col + dcol, row + drow
         if 0 <= ncol < width and 0 <= nrow < height:
             nd = field[nrow * width + ncol]
-            if 0 <= nd < best_dist and not is_solid_tile(tiled_map, col + dcol, row) and not is_solid_tile(tiled_map, col, row + drow):
+            flank_a, flank_b = (col + dcol, row), (col, row + drow)
+            if (0 <= nd < best_dist
+                    and not is_solid_tile(tiled_map, *flank_a) and flank_a not in blocked_tiles
+                    and not is_solid_tile(tiled_map, *flank_b) and flank_b not in blocked_tiles):
                 best_dist = nd
                 best_dx, best_dy = (ncol + .5) * tw - zx, (nrow + .5) * th - zy
     return best_dx, best_dy
@@ -100,9 +124,10 @@ def move_zombies(zombies, player, dt, speed, obstacle=None):
     tw,th=tiled_map.tile_width,tiled_map.tile_height
     target_col=max(0,min(tiled_map.width-1,int(player.pos.x//tw)))
     target_row=max(0,min(tiled_map.height-1,int(player.pos.y//th)))
-    field=_flow_field_to(tiled_map,target_col,target_row)
+    field=_flow_field_to(tiled_map,target_col,target_row,obstacle)
+    blocked_tiles=_obstacle_tiles(tiled_map,obstacle)
     for z in zombies:
-        dx,dy=_steer_along_field(tiled_map,field,z.pos.x,z.pos.y,player.pos.x,player.pos.y)
+        dx,dy=_steer_along_field(tiled_map,field,z.pos.x,z.pos.y,player.pos.x,player.pos.y,blocked_tiles)
         d=(dx*dx+dy*dy)**.5 or 1
         actual=ENEMY_TYPES.get(z.enemy_type, ENEMY_TYPES["walker"]).speed + speed - 18
         half=z.radius

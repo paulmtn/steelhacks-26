@@ -26,7 +26,7 @@ class Game:
         self.state=StateMachine(); self.progress=PlayerProgress()
         self.pools=EntityPools(MAX_ZOMBIES,MAX_BULLETS,MAX_PARTICLES,MAX_PICKUPS)
         self.grid=SpatialHash(); self.player=Player(active=True,pos=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2))
-        self.shop=Shop(pos=Vec2(WORLD_WIDTH/2,WORLD_HEIGHT/2+55),park_timer=SHOP_PARK_DURATION)
+        self.shop=Shop(pos=Vec2(WORLD_WIDTH/2+32,WORLD_HEIGHT/2+55),park_timer=SHOP_PARK_DURATION)
         self.spawn_clock=0; self.fire_clock=0
         self.dev=False; self.demo_mode=False; self.hitboxes=False
         self.camera=Vec2(); self.last=time.perf_counter()
@@ -124,6 +124,7 @@ class Game:
             zombies,
             self.grid,
             viewport=(self.camera.x, self.camera.y, WIDTH, HEIGHT),
+            obstacle=obstacle,
         )
         aim_dx,aim_dy=(target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y) if target else (0,0)
         update_player_facing(self.player,dx,dy,aim_dx,aim_dy)
@@ -131,10 +132,12 @@ class Game:
         self.player.is_firing=bool(target)
         if target and self.fire_clock<=0:
             dx,dy=target.pos.x-self.player.pos.x,target.pos.y-self.player.pos.y; d=math.hypot(dx,dy) or 1
+            ramp=min(1.0,max(0,self.progress.damage-1)/BULLET_DAMAGE_RAMP)
+            bullet_radius=BULLET_COIN_RADIUS+(BULLET_FULL_RADIUS-BULLET_COIN_RADIUS)*ramp
             for shot in range(self.progress.shots):
                 spread=(shot-(self.progress.shots-1)/2)*.12
                 sx,sy=dx/d*math.cos(spread)-dy/d*math.sin(spread), dx/d*math.sin(spread)+dy/d*math.cos(spread)
-                fire(self.pools.bullets,self.player.pos.x,self.player.pos.y,sx,sy,BULLET_SPEED,self.progress.damage)
+                fire(self.pools.bullets,self.player.pos.x,self.player.pos.y,sx,sy,BULLET_SPEED,self.progress.damage,bullet_radius)
             self.fire_clock=self.progress.fire_rate
         if target and self.progress.orb_count and self.player.orb_fire_timer <= 0:
             for orb_index in range(self.progress.orb_count):
@@ -189,7 +192,7 @@ class Game:
                 + max(0, self.progress.damage - 1),
             )
             self.progress.hail_timer = HAIL_RATE
-        update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid)
+        update_bullets(self.pools.bullets,zombies,dt,WORLD_WIDTH,WORLD_HEIGHT,self.grid,obstacle=obstacle)
         # Anything that lost hp this frame but is still alive flashes its
         # "hurt" sheet; the ones that hit 0 are instead marked dying below.
         for z in zombies:

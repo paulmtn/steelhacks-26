@@ -107,28 +107,33 @@ def rect_collides(tiled_map, x, y, half_width, half_height):
 
 _ORTHOGONAL_STEPS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
-def compute_distance_field(tiled_map, target_col, target_row):
+def compute_distance_field(tiled_map, target_col, target_row, blocked_tiles=frozenset()):
     """BFS tile-step distance from every walkable tile to (target_col, target_row),
-    4-directionally, respecting the Collisions layer.
+    4-directionally, respecting the Collisions layer plus any extra
+    blocked_tiles -- tiles that are impassable right now but aren't part of
+    the static tile grid, e.g. the ones a parked shop van currently covers
+    (see game.systems.movement._obstacle_tiles). Defaults to none, so callers
+    that don't have a dynamic obstacle to route around (like the van's own
+    pathing to its next destination) are unaffected.
 
     Returns a flat, row-major list (len width*height) of integer step counts;
-    -1 marks a solid tile, or one BFS couldn't reach (walled off from the
-    target). Grid edges cost the same as walls: cells off the map are never
-    queued.
+    -1 marks a solid or blocked tile, or one BFS couldn't reach (walled off
+    from the target). Grid edges cost the same as walls: cells off the map
+    are never queued.
 
     This single BFS is what makes pathing cheap for any number of zombies: it
     runs once per target tile (not once per zombie), and every zombie then
     just reads off the precomputed distance of its own tile and its
     neighbors -- O(tiles) shared work instead of O(zombies * search). See
-    game.systems.movement.move_zombies, which caches this per player tile and
-    only recomputes when the player crosses into a new one.
+    game.systems.movement.move_zombies, which caches this per player tile
+    (and current obstacle footprint) and only recomputes when either changes.
     """
     width, height = tiled_map.width, tiled_map.height
     dist = [-1] * (width * height)
     if not (0 <= target_col < width and 0 <= target_row < height):
         return dist
     solid = _solid_tiles(tiled_map)
-    if (target_col, target_row) in solid:
+    if (target_col, target_row) in solid or (target_col, target_row) in blocked_tiles:
         return dist
     dist[target_row * width + target_col] = 0
     queue = deque(((target_col, target_row),))
@@ -139,20 +144,26 @@ def compute_distance_field(tiled_map, target_col, target_row):
             ncol, nrow = col + dcol, row + drow
             if 0 <= ncol < width and 0 <= nrow < height:
                 idx = nrow * width + ncol
-                if dist[idx] == -1 and (ncol, nrow) not in solid:
+                if dist[idx] == -1 and (ncol, nrow) not in solid and (ncol, nrow) not in blocked_tiles:
                     dist[idx] = next_dist
                     queue.append((ncol, nrow))
     return dist
 
-def has_line_of_sight(tiled_map, x0, y0, x1, y1):
+def has_line_of_sight(tiled_map, x0, y0, x1, y1, obstacle=None):
     """True if the straight segment from (x0, y0) to (x1, y1) never crosses a
-    solid (Collisions-layer) tile. Used to stop the player's auto-aim from
-    picking an enemy hidden behind a wall.
+    solid (Collisions-layer) tile or the given obstacle rect. Used to stop
+    the player's auto-aim (and thus its projectiles) from picking an enemy
+    hidden behind a wall -- or behind the parked shop van, which isn't part
+    of the tile grid but is just as solid (see game.systems.shop.shop_obstacle).
+
+    obstacle: an optional (x, y, half_width, half_height) rectangle, same
+    shape as game.systems.movement._blocked_by_obstacle's.
 
     Samples the segment every half-tile rather than doing an exact tile
     raycast (e.g. Amanatides-Woo DDA) -- simpler to get right, and a half-tile
     step can't skip over a whole solid tile between samples, so it can't miss
-    a wall. Cheap either way: this only ever runs over the handful of
+    a wall (or, for the same reason, the van -- its narrowest side is still
+    three tiles). Cheap either way: this only ever runs over the handful of
     already-nearby, in-viewport candidates nearest_target considers, not
     every zombie in the world.
     """
@@ -160,12 +171,16 @@ def has_line_of_sight(tiled_map, x0, y0, x1, y1):
     dist = (dx * dx + dy * dy) ** .5
     if dist == 0:
         return True
+    if obstacle is not None:
+        ox, oy, ohw, ohh = obstacle
     step = min(tiled_map.tile_width, tiled_map.tile_height) / 2
     steps = max(1, int(dist // step))
     for i in range(1, steps):
         t = i / steps
-        col = int((x0 + dx * t) // tiled_map.tile_width)
-        row = int((y0 + dy * t) // tiled_map.tile_height)
+        px, py = x0 + dx * t, y0 + dy * t
+        col, row = int(px // tiled_map.tile_width), int(py // tiled_map.tile_height)
         if is_solid_tile(tiled_map, col, row):
+            return False
+        if obstacle is not None and abs(px - ox) <= ohw and abs(py - oy) <= ohh:
             return False
     return True

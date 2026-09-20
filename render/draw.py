@@ -105,7 +105,9 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
     draw_tilemap(p,get_world_map(),ox,oy)
     draw_shop(p,shop,ox,oy)
     if shop.state=="parked":
-        p.text(shop.pos.x-ox-14,shop.pos.y-oy-58,"SHOP",TEXT)
+        label="SHOP: PRESS E."
+        label_y=shop.pos.y-oy-58+(32 if shop.orientation=="horizontal" else 16)
+        p.text(shop.pos.x-ox-len(label)*2,label_y,label,TEXT)
     draw_player(p,player,ox,oy)
     for orb_index in range(progress.orb_count):
         angle = player.orb_angle + (2 * math.pi * orb_index / progress.orb_count)
@@ -130,7 +132,7 @@ def draw_world(p,player,pools,progress,mode,camera,shop,dev=False,
             p.line(star_x-5, star_y, star_x+5, star_y, 10)
             p.line(star_x, star_y-5, star_x, star_y+5, 10)
     for z in pools.zombies.active(): draw_zombie(p,z,ox,oy)
-    for b in pools.bullets.active(): draw_sprite(p,"bullet",b.pos.x-ox,b.pos.y-oy)
+    for b in pools.bullets.active(): p.circ(b.pos.x-ox,b.pos.y-oy,round(b.radius),7)
     for effect in pools.particles.active():
         if effect.kind == "beam":
             p.line(
